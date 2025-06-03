@@ -2,7 +2,7 @@ import pygame
 import sys
 import random
 # import math
-# import time
+import time
 
 from pygame.locals import QUIT, MOUSEMOTION
 
@@ -19,10 +19,10 @@ HEIGHT = 720
 cells = []  # TODO: cell can be also another player
 is_alive = True
 
-# counter = 0
-# frame_rate = 30
-# start_time = 0
-# frame_rate_delay = 0.5
+counter = 0
+frame_rate = 30
+start_time = 0
+frame_rate_delay = 0.5
 
 
 class Cell():
@@ -138,6 +138,14 @@ if __name__ == "__main__":
         text = FONT.render(
             "Mass: " + str((player.radius)), False, text_color)
         SCREEN.blit(text, (20, 20))
+
+        counter += 1
+        if delay := (time.time() - start_time) > frame_rate_delay:
+            frame_rate = round(counter / delay)
+            counter = 0
+            start_time = time.time()
+        SCREEN.blit(FONT.render(
+            f"FPS: {frame_rate}", False, (255, 255, 255)), (20, 50))
 
         WIDTH, HEIGHT = pygame.display.get_surface().get_size()
         pygame.display.update()
