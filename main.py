@@ -91,8 +91,8 @@ if __name__ == "__main__":
     # spawn point cells
     for i in range(cell_count):
         new_cell = Cell(
-            random.randint(-map_size, map_size),
-            random.randint(-map_size, map_size),
+            random.randint(0, 2*map_size),
+            random.randint(0, 2*map_size),
             (
                 random.randint(0, 255),
                 random.randint(0, 255),
@@ -103,7 +103,8 @@ if __name__ == "__main__":
         cells.append(new_cell)
 
     # spawn player
-    player = Player(0, 0, player_color, spawn_size, "Player")
+    player = Player(map_size / 2, map_size / 2,
+                    player_color, spawn_size, "Player")
 
     while True:
         for event in pygame.event.get():
