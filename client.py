@@ -213,7 +213,7 @@ def render_game(conn):
 
         # Throttle sending to avoid spam
         if current_time - last_send_time > SEND_INTERVAL:
-            data = struct.pack('ff', mouse_x, mouse_y)
+            data = struct.pack('ff', (mouse_x - WIDTH / 2), (mouse_y - HEIGHT / 2))
             conn.sendall(data)
             last_send_time = current_time
 
@@ -227,8 +227,8 @@ def render_game(conn):
             for cell in cells.values():
                 cell.draw(
                     SCREEN,
-                    cell.pos_x - current_player.pos_x,
-                    cell.pos_y - current_player.pos_y
+                    cell.pos_x - current_player.pos_x + WIDTH / 2,
+                    cell.pos_y - current_player.pos_y + HEIGHT / 2
                 )
 
         # TODO: lock
@@ -236,8 +236,8 @@ def render_game(conn):
             # print("other player: ", other_player.username)
             other_player.draw(
                 SCREEN,
-                other_player.pos_x - current_player.pos_x,
-                other_player.pos_y - current_player.pos_y
+                other_player.pos_x - current_player.pos_x + WIDTH / 2,
+                other_player.pos_y - current_player.pos_y + HEIGHT / 2
             )
 
         current_player.draw(SCREEN, (WIDTH / 2), (HEIGHT / 2))
@@ -263,7 +263,7 @@ def render_game(conn):
         CLOCK.tick(FPS)
         SCREEN.fill(background_color)
 
-        # print((current_player.pos_x, current_player.pos_y))
+        print((current_player.pos_x, current_player.pos_y))
 
         # delta_time_measure = time.time() - start_time_measure
         # print(f"Time elapsed: {delta_time_measure * 100:2f}")

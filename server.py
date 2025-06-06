@@ -11,9 +11,6 @@ map_size = 4000
 PLAYER_SPAWN_RADIUS = 35
 CELL_RADIUS = 10
 
-WIDTH = 1280
-HEIGHT = 720
-
 # ugly, but should work faster
 # Cell(pos_x, pos_y, color) + id -- natural number / arr indx
 # we can split it into 2 1d array [pos_x, pos_y], [color]
@@ -127,33 +124,11 @@ class Player(CellData):
 
     def _calculate_cell_distance(self, cell):
         '''Returns distance between origins of two cells'''
-        return (cell.pos_x - (self.pos_x + WIDTH / 2)) ** 2 + (cell.pos_y - (self.pos_y + HEIGHT / 2)) ** 2
+        return (cell.pos_x - (self.pos_x)) ** 2 + (cell.pos_y - (self.pos_y)) ** 2
 
     def _collides_with(self, cell):
         return self._calculate_cell_distance(cell) < (CELL_RADIUS * 0.9 + self.radius) ** 2
 
-
-# def network_handler(conn):
-#     """Receive and process cell removal data"""
-#     while True:  # TODO is alive or sth
-#         try:
-#             data = conn.recv(8)
-#             mouse_x, mouse_y = struct.unpack('ff', data)
-
-#             # TODO: handle disconnetion and death
-#             # if event.type == QUIT:
-#             # sys.exit()
-#             # if event.type == MOUSEMOTION and is_alive:
-#             #     mouse_x, mouse_y = event.pos
-
-#             # TODO: get quit event
-#             # TODO: get mouse pos from player or player pos
-
-#             player.pos_x += ((mouse_x - WIDTH / 2) / player.radius / 2)
-#             player.pos_y += ((mouse_y - HEIGHT / 2) / player.radius / 2)
-
-#         except Exception as e:
-#             print(f"Network error: {e}")
 
 
 def main():
@@ -218,9 +193,13 @@ def spawn_player(client_id, conn, username) -> Player:
         random.randint(0, 255)
     )
 
+    # return Player(
+    #     client_id, random.randint(
+    #         0, map_size * 2), random.randint(0, map_size * 2),  # TODO: why x2
+    #     player_color, username, conn)
+
     return Player(
-        client_id, random.randint(
-            0, map_size * 2), random.randint(0, map_size * 2),  # TODO: why x2
+        client_id, 0, 0,  # TODO: why x2
         player_color, username, conn)
 
 # GET
@@ -285,14 +264,15 @@ def handle_player_gameplay(conn, client_id):
             data = conn.recv(8)
             mouse_x, mouse_y = struct.unpack('ff', data)
 
-            if mouse_x == -1:
-                print(f"Player {username} disconnected.")
-                connections.pop(client_id)
-                # TODO: handle
-                break
+            # TODO - this cannot be -1!
+            # if mouse_x == -1:
+            #     print(f"Player {username} disconnected.")
+            #     connections.pop(client_id)
+            #     # TODO: handle
+            #     break
 
-            player.pos_x += ((mouse_x - WIDTH / 2) / player.radius / 2)
-            player.pos_y += ((mouse_y - HEIGHT / 2) / player.radius / 2)
+            player.pos_x += (mouse_x / player.radius / 2)
+            player.pos_y += (mouse_y / player.radius / 2)
 
             player.collision_check()
 
