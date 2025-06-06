@@ -5,6 +5,7 @@ import time
 import sys
 from threading import Thread, Lock
 from pygame.locals import QUIT, MOUSEMOTION
+from newtork_utils import decode_color, receive_message, unpack_cells
 
 pygame.init()
 
@@ -48,88 +49,29 @@ class Player(Cell):
         text = FONT.render(str(round(self.radius)), False, text_color)
 
 
-def receive_exact(sock, n_bytes):
-    """Receive exactly n bytes from socket"""
-    data = b''
-    while len(data) < n_bytes:
-        chunk = sock.recv(n_bytes - len(data))
-        if not chunk:
-            raise ConnectionError("Socket connection broken")
-        data += chunk
-    return data
-
-
-def receive_message(conn):
-    # Read 4 bytes for length
-    length_data = conn.recv(4)
-    if not length_data:
-        return None
-    length = struct.unpack('I', length_data)[0]
-
-    # Read exact message length
-    message = conn.recv(length).decode('ascii')
-    return message
-
-
-def decode_color(color):
-    r = color % 255
-    color //= 255
-    g = color % 255
-    color //= 255
-    b = color % 255
-
-    return (r, g, b)
-
-
 def parse_cell_data(cell_data):
     for cell in cell_data:
         new_cell = Cell(
             cell[0],
-            cell[1] - 32768,
-            cell[2] - 32768,
+            cell[1],
+            cell[2],
             decode_color(cell[3]),
             10  # TODO: send config info in json
         )
         cells[cell[0]] = new_cell
 
 
-def unpack_cells(sock):
-    """
-    Receive and unpack cell data from socket
-    Returns: list of tuples [(key, pos_x, pos_y, color), ...]
-    """
-    try:
-        # First receive the data length
-        length_data = receive_exact(sock, 4)
-        data_length = struct.unpack('I', length_data)[0]
-
-        # Then receive the actual data
-        packed_data = receive_exact(sock, data_length)
-
-        # Unpack number of cells
-        cell_count = struct.unpack('I', packed_data[:4])[0]
-
-        cells = []
-        offset = 4  # Skip the cell count
-
-        for i in range(cell_count):
-            # Unpack each cell (4 integers)
-            cell_data = struct.unpack('IIII', packed_data[offset:offset+16])
-            cells.append(cell_data)  # (key, pos_x, pos_y, color)
-            offset += 16
-
-        return cells
-    except Exception as e:
-        print(f"Error receiving cells: {e}")
-        return []
-
-
 data_lock = Lock()
+alive_lock = Lock()
 
 
 def network_handler(conn):
     """Receive and process cell removal data"""
-    while True:  # TODO is alive or sth
+    with alive_lock:
+        global is_alive
+        alive = is_alive
+
+    while alive:  # TODO is alive or sth
         # start_time_measure = time.time()
         try:
             # Read count
@@ -145,8 +87,12 @@ def network_handler(conn):
 
         except Exception as e:
             print(f"Error receiving removals: {e}")
+            # TODO: receive stats here
         # delta_time_measure = time.time() - start_time_measure
         # print(f"Net Time elapsed: {delta_time_measure * 100:2f}")
+
+        with alive_lock:
+            alive = is_alive
 
 
 def render_game(conn):
@@ -171,8 +117,10 @@ def render_game(conn):
 
     # Start network thread
     network_thread_obj = Thread(
-        target=network_handler, args=(conn,), daemon=False)
+        target=network_handler, args=(conn,))
     network_thread_obj.start()
+
+    global is_alive
 
     while True:
         # start_time_measure = time.time()
@@ -182,7 +130,11 @@ def render_game(conn):
         for event in pygame.event.get():
             if event.type == QUIT:
                 pygame.quit()
-                sys.exit()
+                with alive_lock:
+                    is_alive = False
+                data = struct.pack('ff', -1, -1)
+                conn.sendall(data)
+                return
             if event.type == MOUSEMOTION and is_alive:
                 mouse_x, mouse_y = event.pos
             else:
@@ -191,7 +143,7 @@ def render_game(conn):
 
         # Throttle sending to avoid spam
         if current_time - last_send_time > SEND_INTERVAL:
-            data = struct.pack('ff', mouse_x, mouse_y)  # 'ff' = 2 floats
+            data = struct.pack('ff', mouse_x, mouse_y)
             conn.sendall(data)
             last_send_time = current_time
 
@@ -208,12 +160,11 @@ def render_game(conn):
                     cell.pos_y - player.pos_y
                 )
 
-        if is_alive:
-            player.draw(SCREEN, (WIDTH / 2), (HEIGHT / 2))
-            # player.collision_check()
-        else:
-            text = BIGFONT.render("Game over", False, text_color)
-            SCREEN.blit(text, (WIDTH / 2 - 150, HEIGHT / 2 - 40))
+        player.draw(SCREEN, (WIDTH / 2), (HEIGHT / 2))
+        # player.collision_check()
+
+        # text = BIGFONT.render("Game over", False, text_color)
+        # SCREEN.blit(text, (WIDTH / 2 - 150, HEIGHT / 2 - 40))
 
         text = FONT.render(
             "Mass: " + str((player.radius)), False, text_color)

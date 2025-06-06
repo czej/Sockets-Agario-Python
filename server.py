@@ -4,8 +4,8 @@ import random
 import time
 from threading import Thread
 import re
-import logging
 import struct
+from newtork_utils import send_cells, send_message
 
 from pygame.locals import QUIT, MOUSEMOTION
 
@@ -89,45 +89,6 @@ class Player(CellData):
 
     def _collides_with(self, cell):
         return self._calculate_cell_distance(cell) < (CELL_RADIUS * 0.9 + self.radius) ** 2
-
-
-def pack_cells(cells):
-    """
-    Pack cell data into binary format for efficient transmission
-    cells: list of tuples [(key, pos_x, pos_y, color), ...]
-    """
-    # Format: 'I' = unsigned int (4 bytes each)
-    # We'll send count first, then all cell data
-    packed_data = struct.pack('I', len(cells))  # Number of cells
-
-    for key, cell in cells.items():
-        # Pack each cell as 4 unsigned integers
-        # TODO: change to non negative
-        # TODO: consider shorts
-        packed_data += struct.pack('IIII', key, cell.pos_x +
-                                   32768, cell.pos_y + 32768, encode_color(cell.color))
-
-    return packed_data
-
-
-def send_cells(sock, cells):
-    """Send cell data over socket"""
-    try:
-        packed_data = pack_cells(cells)
-        # Send data length first (for reliable receiving)
-        data_length = len(packed_data)
-        sock.send(struct.pack('I', data_length))
-        # Send the actual data
-        sock.send(packed_data)
-        return True
-    except Exception as e:
-        print(f"Error sending cells: {e}")
-        return False
-
-
-def encode_color(color):
-    r, g, b = color
-    return r * 255*255 + g * 255 + b
 
 
 # def network_handler(conn):
@@ -225,12 +186,6 @@ def validate_username(username):
 # POST
 
 
-def send_message(conn, msg):
-    data = msg.encode("ascii")
-    length = struct.pack('I', len(data))
-    conn.sendall(length + data)
-
-
 def handle_player_gameplay(conn):
     # TODO: send current game state
     # TODO: ideally we want only send once all cells
@@ -286,12 +241,9 @@ def handle_player_gameplay(conn):
             data = conn.recv(8)
             mouse_x, mouse_y = struct.unpack('ff', data)
 
-            # TODO: handle disconnetion and death
-            # if event.type == QUIT:
-            # sys.exit()
-            # if event.type == MOUSEMOTION and is_alive:
-            #     mouse_x, mouse_y = event.pos
-
+            if mouse_x == -1:
+                print("Player disconnected.")
+                break
             # TODO: get quit event
             # TODO: get mouse pos from player or player pos
 
