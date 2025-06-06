@@ -5,14 +5,15 @@ import time
 import sys
 from threading import Thread, Lock
 from pygame.locals import QUIT, MOUSEMOTION
-from newtork_utils import decode_color, receive_message, unpack_cells, receive_exact
+from newtork_utils import decode_color, receive_message, unpack_cells, receive_exact, unpack_players
 
 pygame.init()
 
 WIDTH = 1280
 HEIGHT = 720
-cells = {}  # TODO: cell can be also another player
+cells = {}
 is_alive = True
+players = {}
 FONT = pygame.font.Font("freesansbold.ttf", 32)
 BIGFONT = pygame.font.Font("freesansbold.ttf", 72)
 
@@ -29,27 +30,30 @@ spawn_size = 35
 
 class Cell():
     def __init__(self, cell_id, x, y, color, radius):
-        self.cell_id = cell_id
+        self.cell_id = cell_id  # TODO: is this needed?
         self.radius = radius
         self.color = color
         self.pos_x = x
         self.pos_y = y
 
     def draw(self, surface, x, y):
-        pygame.draw.circle(surface, self.color, (x, y), int(self.radius))
+        pygame.draw.circle(surface, self.color, (x, y),
+                           int(self.radius))  # TODO: why int?
 
 
 class Player(Cell):
-    def __init__(self, x, y, color, radius, name):
+    def __init__(self, username, x, y, color, radius):
         super().__init__(-1, x, y, color, radius)
+        self.username = username
 
     def draw(self, surface, x, y):
         super().draw(surface, x, y)
+        # todo if username == curren_username or in different method
         global FONT
         text = FONT.render(str(round(self.radius)), False, text_color)
 
 
-def parse_cell_data(cell_data):
+def parse_cells_data(cell_data):
     for cell in cell_data:
         new_cell = Cell(
             cell[0],
@@ -59,6 +63,19 @@ def parse_cell_data(cell_data):
             10  # TODO: send config info in json
         )
         cells[cell[0]] = new_cell
+
+
+def parse_players_data(players_data):
+    for player_data in players_data:
+        username, pos_x, pos_y, color, radius = player_data
+        new_player = Player(
+            username,
+            pos_x,
+            pos_y,
+            decode_color(color),
+            radius
+        )
+        players[username] = new_player
 
 
 data_lock = Lock()
@@ -106,8 +123,10 @@ def network_handler(conn):
         with alive_lock:
             alive = is_alive
 
+# TODO: change encoding: ascii to Unicode or UTF? short char
 
-def render_game(conn):
+
+def render_game(conn, username):
     global WIDTH, HEIGHT
     last_send_time = 0
     SEND_INTERVAL = 1/60  # 60 FPS max
@@ -125,7 +144,7 @@ def render_game(conn):
 
     # spawn player
     global player
-    player = Player(2000, 2000, player_color, spawn_size, "Player")
+    player = players.pop(username)
 
     # Start network thread
     network_thread_obj = Thread(
@@ -163,7 +182,6 @@ def render_game(conn):
         player.pos_y += ((mouse_y - HEIGHT / 2) / player.radius / 2)
 
         # print(player.pos_x)
-        # with data_lock: TODO
         with data_lock:
             for cell in cells.values():
                 cell.draw(
@@ -171,6 +189,15 @@ def render_game(conn):
                     cell.pos_x - player.pos_x,
                     cell.pos_y - player.pos_y
                 )
+
+        # TODO: lock
+        for other_player in players.values():
+            # print("other player: ", other_player.username)
+            other_player.draw(
+                SCREEN,
+                other_player.pos_x - player.pos_x,
+                other_player.pos_y - player.pos_y
+            )
 
         player.draw(SCREEN, (WIDTH / 2), (HEIGHT / 2))
         # player.collision_check()
@@ -205,7 +232,8 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     s.connect((HOST, PORT))
     print("Connected")
 
-    response = ''
+    response = ""
+    username = ""
     request = receive_message(s)
     while request == "GET username":
         print("Type username: ")
@@ -222,15 +250,20 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         print(request)
         # sys.exit()
 
-    request = receive_message(s)
-    print("here!")
-    if request.startswith("POST"):
-        received_cells = unpack_cells(s)
-        print("Received cells:", received_cells)
-        parse_cell_data(received_cells)
-    else:
-        print("An error occurred")
-        print(request)
-        # sys.exit()
+    for i in range(2):  # TODO: take this num from config
+        request = receive_message(s)
+        print("here!")
+        if request == "POST cells":
+            received_cells = unpack_cells(s)
+            print("Received cells:", received_cells)
+            parse_cells_data(received_cells)
+        elif request == "POST players":
+            received_players = unpack_players(s)
+            print("Received players: ", received_players)
+            parse_players_data(received_players)
+        else:
+            print("An error occurred")
+            print(request)
+            # sys.exit()
 
-    render_game(s)
+    render_game(s, username)

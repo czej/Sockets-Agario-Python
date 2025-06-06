@@ -1,20 +1,16 @@
 import socket
-import sys
 import random
 import time
 from threading import Thread, Lock
 import re
 import struct
-from newtork_utils import send_cells, send_message, encode_color
+from newtork_utils import send_cells, send_message, encode_color, send_players
 from uuid import uuid4
-
-from pygame.locals import QUIT, MOUSEMOTION
 
 cell_count = 2000
 map_size = 4000
 PLAYER_SPAWN_RADIUS = 35
 CELL_RADIUS = 10
-respawn_cells = True
 
 WIDTH = 1280
 HEIGHT = 720
@@ -25,13 +21,12 @@ HEIGHT = 720
 # or everything in one array - colors are just numbers; those can be even encoded ()_255 == 255*255^2 + 255*255 + 255
 cells = {}  # TODO: cell can be also another player? -- better split
 cells_lock = Lock()
-is_alive = True  # TODO: is this needed - if yes - make var; if not - just remove from players
 
 HOST = "127.0.0.1"
 PORT = 9999
 
 players = {}  # player_name, player_obj
-connections = {}
+connections = {}  # client_id, conn
 
 # @dataclass -- ideally, but I'll convert it to Java anyways
 # TODO: arrays + ?id
@@ -52,6 +47,12 @@ def notify_all_clients(format: str, current_client_id: uuid4, *data):
         # TODO: consider ? -> I and use it as a communication
         conn.sendall(struct.pack(
             "?" + format, bool(key == current_client_id), *data))
+
+# 4 ? eaten another player
+# 3 == collision with another player
+# 2 == another player has moved
+# 1 == cell eaten by current_player
+# 0 == cell eaten by different player
 
 
 class Player(CellData):
@@ -191,6 +192,18 @@ def validate_username(username):
 
     return "OK"
 
+
+def spawn_player(client_id, conn, username) -> Player:
+    player_color = encode_color(
+        random.randint(0, 255),
+        random.randint(0, 255),
+        random.randint(0, 255)
+    )
+
+    return Player(
+        client_id, map_size / 2, map_size / 2,
+        player_color, username, conn)
+
 # GET
 # ERROR
 # INFO
@@ -199,8 +212,8 @@ def validate_username(username):
 
 def handle_player_gameplay(conn, client_id):
     # TODO: send config
+    username = ""
 
-    # username
     with conn:
         while True:
             print("Asking for username...")
@@ -213,7 +226,10 @@ def handle_player_gameplay(conn, client_id):
             else:
                 print(f"Player {username} has joined the game.")
                 send_message(conn, "INFO Successfully connected to the game.")
-                # players[username] = ...  # TODO: remove player and cleanup
+                # spawn player
+                # TODO: lock on this action - checking and adding username to map
+                # TODO: remove player and cleanup - even if connection was broken
+                players[username] = spawn_player(client_id, conn, username)
                 break
 
             # TODO: handle no data == null
@@ -222,28 +238,23 @@ def handle_player_gameplay(conn, client_id):
 
         # TODO: handle random
         # global player  # TODO: change to field
-        # spawn player
-        player_color = (
-            random.randint(0, 255),
-            random.randint(0, 255),
-            random.randint(0, 255)
-        )
-
-        player = Player(client_id, map_size / 2, map_size / 2,
-                        player_color, "Player1", conn)
-
-        # TODO -1 mouse == disconnect
 
         # send init game state
         send_message(conn, "POST cells")
         send_cells(conn, cells)
 
+        # TODO send players
+        send_message(conn, "POST players")
+        send_players(conn, players)
+
         last_update = time.time()
-        TARGET_FPS = 15
+        # TARGET_FPS = 15
 
         # network_thread_obj = Thread(
         #     target=network_handler, args=(conn,), daemon=True)
         # network_thread_obj.start()
+
+        player = players[username]
 
         while True:
             data = conn.recv(8)
@@ -276,3 +287,4 @@ if __name__ == "__main__":
 
 
 # TODO: exception handling
+# TODO: synchorniaztion!!!
