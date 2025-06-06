@@ -52,9 +52,12 @@ class Player(CellData):
 
     def collision_check(self):
         cells_to_remove = []
+        # start_time_measure = time.time()
         for key, cell in cells.items():
             if self._collides_with(cell) and CELL_RADIUS <= self.radius:
                 cells_to_remove.append(key)
+                # TODO: may be blocking? rather not
+                self.conn.sendall(struct.pack('II', 0, key))
                 self.radius += 0.5
 
                 print(f"Player: {self.pos_x}, {self.pos_y}, Cell: ",
@@ -77,8 +80,8 @@ class Player(CellData):
         for cell_key in cells_to_remove:
             cells.pop(cell_key)
 
-        if cells_to_remove:
-            send_cell_keys(self.conn, cells_to_remove, remove=True)
+        # delta_time_measure = time.time() - start_time_measure
+        # print(f"Removal time elapsed: {delta_time_measure * 100:2f}")
 
     def _calculate_cell_distance(self, cell):
         '''Returns distance between origins of two cells'''
@@ -86,21 +89,6 @@ class Player(CellData):
 
     def _collides_with(self, cell):
         return self._calculate_cell_distance(cell) < (CELL_RADIUS * 0.9 + self.radius) ** 2
-
-
-def send_cell_keys(conn, cell_keys, remove=False):
-    """Send list of cell keys to remove"""
-    try:
-        # Pack: count + cell keys
-        data = struct.pack('I', len(cell_keys))
-        for key in cell_keys:
-            data += struct.pack('I', key)
-
-        # Send with message type prefix
-        send_message(conn, "DELETE cells")
-        conn.sendall(data)
-    except Exception as e:
-        print(f"Error sending removals: {e}")
 
 
 def pack_cells(cells):
@@ -140,6 +128,29 @@ def send_cells(sock, cells):
 def encode_color(color):
     r, g, b = color
     return r * 255*255 + g * 255 + b
+
+
+# def network_handler(conn):
+#     """Receive and process cell removal data"""
+#     while True:  # TODO is alive or sth
+#         try:
+#             data = conn.recv(8)
+#             mouse_x, mouse_y = struct.unpack('ff', data)
+
+#             # TODO: handle disconnetion and death
+#             # if event.type == QUIT:
+#             # sys.exit()
+#             # if event.type == MOUSEMOTION and is_alive:
+#             #     mouse_x, mouse_y = event.pos
+
+#             # TODO: get quit event
+#             # TODO: get mouse pos from player or player pos
+
+#             player.pos_x += ((mouse_x - WIDTH / 2) / player.radius / 2)
+#             player.pos_y += ((mouse_y - HEIGHT / 2) / player.radius / 2)
+
+#         except Exception as e:
+#             print(f"Network error: {e}")
 
 
 def main():
@@ -264,9 +275,14 @@ def handle_player_gameplay(conn):
         send_cells(conn, cells)
 
         last_update = time.time()
-        TARGET_FPS = 30
+        TARGET_FPS = 15
+
+        # network_thread_obj = Thread(
+        #     target=network_handler, args=(conn,), daemon=True)
+        # network_thread_obj.start()
 
         while True:
+            # print(player.pos_x)
             data = conn.recv(8)
             mouse_x, mouse_y = struct.unpack('ff', data)
 
@@ -282,47 +298,22 @@ def handle_player_gameplay(conn):
             player.pos_x += ((mouse_x - WIDTH / 2) / player.radius / 2)
             player.pos_y += ((mouse_y - HEIGHT / 2) / player.radius / 2)
 
-            # print(player.pos_x)
+            player.collision_check()
 
-            if is_alive:
-                player.collision_check()
+            print((player.pos_x, player.pos_y))
 
-            current_time = time.time()
-            if current_time - last_update < 1/TARGET_FPS:
-                time.sleep(0.001)
-                continue
-            last_update = current_time
+            # current_time = time.time()
+            # if current_time - last_update < 1/TARGET_FPS:
+            #     time.sleep(0.001)
+            #     continue
+            # last_update = current_time
+
+            # delta_time_measure = time.time() - start_time_measure
+            # print(f"Time elapsed: {delta_time_measure * 100:2f}")
 
 
 if __name__ == "__main__":
     main()
-
-#  while (true) {
-#                     out.println("name?");
-#                     name = in.readLine();
-#                     if (name == null) {
-#                         return;
-#                     }
-#                     synchronized (names) {
-#                         if (!names.contains(name)) {
-#                             names.add(name);
-#                             break;
-#                         }
-#                     }
-#                 }
-
-#                 out.println("accepted");
-#                 writers.add(out);
-
-#                 while (true) {
-#                     String input = in.readLine();
-#                     if (input == null) {
-#                         return;
-#                     }
-#                     for (PrintWriter writer : writers) {
-#                         writer.println("message " + name + ": " + input);
-#                     }
-#                 }
 
 
 # TODO: exception handling

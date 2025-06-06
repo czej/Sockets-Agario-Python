@@ -47,22 +47,6 @@ class Player(Cell):
         global FONT
         text = FONT.render(str(round(self.radius)), False, text_color)
 
-    def collision_check(self):
-        for cell in cells:
-            if self._collides_with(cell) and cell.radius <= self.radius:
-                cells.remove(cell)  # TODO: linkedlist or map
-                self.radius += 0.5
-
-                print(f"Player: {self.pos_x}, {self.pos_y}, Cell: ",
-                      cell.pos_x, cell.pos_y)
-
-    def _calculate_cell_distance(self, cell):
-        '''Returns distance between origins of two cells'''
-        return (cell.pos_x - (self.pos_x + WIDTH / 2)) ** 2 + (cell.pos_y - (self.pos_y + HEIGHT / 2)) ** 2
-
-    def _collides_with(self, cell):
-        return self._calculate_cell_distance(cell) < (cell.radius*0.9 + self.radius) ** 2
-
 
 def receive_exact(sock, n_bytes):
     """Receive exactly n bytes from socket"""
@@ -146,37 +130,29 @@ data_lock = Lock()
 def network_handler(conn):
     """Receive and process cell removal data"""
     while True:  # TODO is alive or sth
+        # start_time_measure = time.time()
         try:
-            data = receive_message(conn)
-            if data.startswith("DELETE cells"):
-                # Read count
-                count_data = conn.recv(4)
-                count = struct.unpack('I', count_data)[0]
+            # Read count
+            data = conn.recv(8)
+            action, key = struct.unpack('II', data)
 
-                # Read cell keys
-                keys_to_remove = []
-                for _ in range(count):
-                    key_data = conn.recv(4)
-                    key = struct.unpack('I', key_data)[0]
-                    keys_to_remove.append(key)
-
-                # Remove from local cells dict
+            # Remove from local cells dict
+            if action == 0:
                 with data_lock:  # TODO: everywhere or concurrent map
-                    for key in keys_to_remove:
-                        cells.pop(key)
-                        print(f"removed cell: {key}")
-
-            else:
-                print("wrong cells data " + data)
+                    cells.pop(key)
+                    print(f"removed cell: {key}")
+                player.radius += 0.5  # no lock, cause only this thread edits -- but other reads!
 
         except Exception as e:
             print(f"Error receiving removals: {e}")
+        # delta_time_measure = time.time() - start_time_measure
+        # print(f"Net Time elapsed: {delta_time_measure * 100:2f}")
 
 
 def render_game(conn):
     global WIDTH, HEIGHT
     last_send_time = 0
-    SEND_INTERVAL = 1/120  # 60 FPS max
+    SEND_INTERVAL = 1/60  # 60 FPS max
     FPS = 30
 
     counter = 0
@@ -190,14 +166,17 @@ def render_game(conn):
     SCREEN = pygame.display.set_mode((1280, 720), pygame.RESIZABLE)
 
     # spawn player
+    global player
     player = Player(2000, 2000, player_color, spawn_size, "Player")
 
     # Start network thread
     network_thread_obj = Thread(
-        target=network_handler, args=(conn,), daemon=True)
+        target=network_handler, args=(conn,), daemon=False)
     network_thread_obj.start()
 
     while True:
+        # start_time_measure = time.time()
+
         current_time = time.time()
 
         for event in pygame.event.get():
@@ -221,12 +200,13 @@ def render_game(conn):
 
         # print(player.pos_x)
         # with data_lock: TODO
-        for cell in cells.values():
-            cell.draw(
-                SCREEN,
-                cell.pos_x - player.pos_x,
-                cell.pos_y - player.pos_y
-            )
+        with data_lock:
+            for cell in cells.values():
+                cell.draw(
+                    SCREEN,
+                    cell.pos_x - player.pos_x,
+                    cell.pos_y - player.pos_y
+                )
 
         if is_alive:
             player.draw(SCREEN, (WIDTH / 2), (HEIGHT / 2))
@@ -251,6 +231,11 @@ def render_game(conn):
         pygame.display.update()
         CLOCK.tick(FPS)
         SCREEN.fill(background_color)
+
+        print((player.pos_x, player.pos_y))
+
+        # delta_time_measure = time.time() - start_time_measure
+        # print(f"Time elapsed: {delta_time_measure * 100:2f}")
 
 
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
