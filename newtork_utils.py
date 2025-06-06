@@ -15,7 +15,7 @@ def _pack_cells(cells):
         # TODO: change to non negative
         # TODO: consider shorts
         packed_data += struct.pack('IIII', key, cell.pos_x,
-                                   cell.pos_y, encode_color(cell.color))
+                                   cell.pos_y, cell.color)
 
     return packed_data
 
@@ -35,8 +35,7 @@ def send_cells(sock, cells):
         return False
 
 
-def encode_color(color):
-    r, g, b = color
+def encode_color(r, g, b):
     return r * 255*255 + g * 255 + b
 
 

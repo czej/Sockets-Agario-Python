@@ -5,7 +5,7 @@ import time
 import sys
 from threading import Thread, Lock
 from pygame.locals import QUIT, MOUSEMOTION
-from newtork_utils import decode_color, receive_message, unpack_cells
+from newtork_utils import decode_color, receive_message, unpack_cells, receive_exact
 
 pygame.init()
 
@@ -74,15 +74,27 @@ def network_handler(conn):
     while alive:  # TODO is alive or sth
         # start_time_measure = time.time()
         try:
-            # Read count
-            data = conn.recv(8)
-            action, key = struct.unpack('II', data)
+            data_format = "?IIII"
+            data = receive_exact(conn, struct.calcsize(data_format))
+
+            current_client, key, new_pos_x, new_pos_y, new_color = struct.unpack(
+                data_format, data)
+            # print("here2 ", (current_client, key, new_pos_x, new_pos_y, new_color))
 
             # Remove from local cells dict
-            if action == 0:
-                with data_lock:  # TODO: everywhere or concurrent map
-                    cells.pop(key)
-                    print(f"removed cell: {key}")
+
+            with data_lock:  # TODO: everywhere or concurrent map
+                cell = cells[key]
+                cell.pos_x = new_pos_x
+                cell.pos_y = new_pos_y
+                cell.color = decode_color(new_color)
+
+                cells[key] = cell  # TODO: is this needed?
+                print(f"Removed cell: {key}")
+                print(
+                    f"New cell was spawned: {new_pos_x}, {new_pos_y}, {new_color}")
+
+            if current_client:
                 player.radius += 0.5  # no lock, cause only this thread edits -- but other reads!
 
         except Exception as e:
@@ -183,7 +195,7 @@ def render_game(conn):
         CLOCK.tick(FPS)
         SCREEN.fill(background_color)
 
-        print((player.pos_x, player.pos_y))
+        # print((player.pos_x, player.pos_y))
 
         # delta_time_measure = time.time() - start_time_measure
         # print(f"Time elapsed: {delta_time_measure * 100:2f}")

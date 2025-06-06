@@ -2,10 +2,11 @@ import socket
 import sys
 import random
 import time
-from threading import Thread
+from threading import Thread, Lock
 import re
 import struct
-from newtork_utils import send_cells, send_message
+from newtork_utils import send_cells, send_message, encode_color
+from uuid import uuid4
 
 from pygame.locals import QUIT, MOUSEMOTION
 
@@ -23,12 +24,14 @@ HEIGHT = 720
 # we can split it into 2 1d array [pos_x, pos_y], [color]
 # or everything in one array - colors are just numbers; those can be even encoded ()_255 == 255*255^2 + 255*255 + 255
 cells = {}  # TODO: cell can be also another player? -- better split
+cells_lock = Lock()
 is_alive = True  # TODO: is this needed - if yes - make var; if not - just remove from players
 
 HOST = "127.0.0.1"
 PORT = 9999
 
 players = {}  # player_name, player_obj
+connections = {}
 
 # @dataclass -- ideally, but I'll convert it to Java anyways
 # TODO: arrays + ?id
@@ -43,45 +46,66 @@ class CellData():
 # EW. TODO: if split then player is represented by many visual cells
 
 
+def notify_all_clients(format: str, current_client_id: uuid4, *data):
+    # TODO: connections lock
+    for key, conn in connections.items():
+        # TODO: consider ? -> I and use it as a communication
+        conn.sendall(struct.pack(
+            "?" + format, bool(key == current_client_id), *data))
+
+
 class Player(CellData):
-    def __init__(self, x, y, color, name, conn):
+    def __init__(self, client_id, x, y, color, name, conn):
         super().__init__(x, y, color)
+        self.client_id = client_id
         self.radius = PLAYER_SPAWN_RADIUS
         self.name = name
         self.conn = conn
 
     def collision_check(self):
-        cells_to_remove = []
+        cells_to_reuse = []
         # start_time_measure = time.time()
-        for key, cell in cells.items():
-            if self._collides_with(cell) and CELL_RADIUS <= self.radius:
-                cells_to_remove.append(key)
-                # TODO: may be blocking? rather not
-                self.conn.sendall(struct.pack('II', 0, key))
-                self.radius += 0.5
+        # TODO: if too slow try changing iteration strategy
+        # 1 map batches - only ~1000 closest
+        # keys are natural nums, so while loop will be ok also
+        # + cell pool or instant respawn for now
+        # --> always same num of cells, just change pos (send new pos for id)
+        # => acquring lock on one item, not the whole map :)
+        with cells_lock:
+            for key, cell in cells.items():
+                if self._collides_with(cell):
+                    new_pos_x, new_pos_y = random.randint(
+                        0, map_size * 2), random.randint(0, map_size * 2)
 
-                print(f"Player: {self.pos_x}, {self.pos_y}, Cell: ",
-                      cell.pos_x, cell.pos_y)
+                    new_color = encode_color(
+                        random.randint(0, 255),
+                        random.randint(0, 255),
+                        random.randint(0, 255)
+                    )
 
-                # TODO: move somewhere else, check <= cells...
-                # if respawn_cells:
-                #     new_cell = Cell(
-                #         random.randint(-map_size, map_size),
-                #         random.randint(-map_size, map_size),
-                #         (
-                #             random.randint(0, 255),
-                #             random.randint(0, 255),
-                #             random.randint(0, 255)
-                #         ),
-                #         5,
-                #     )
-                #     cells.append(new_cell)
+                    cells_to_reuse.append(
+                        (key, new_pos_x, new_pos_y, new_color))
+                    # TODO: this
+                    notify_all_clients(
+                        "IIII", self.client_id, key, new_pos_x, new_pos_y, new_color)
+                    self.radius += 0.5
 
-        for cell_key in cells_to_remove:
-            cells.pop(cell_key)
+                    print(f"Player: {self.pos_x}, {self.pos_y}, Cell: ",
+                          cell.pos_x, cell.pos_y)
 
-        # delta_time_measure = time.time() - start_time_measure
-        # print(f"Removal time elapsed: {delta_time_measure * 100:2f}")
+                    print("New cell: ", (key, new_pos_x, new_pos_y, new_color))
+
+            for new_cell_values in cells_to_reuse:
+                key, new_pos_x, new_pos_y, new_color = new_cell_values
+                cell = cells[key]
+                cell.pos_x = new_pos_x
+                cell.pos_y = new_pos_y
+                cell.color = new_color
+
+                cells[key] = cell
+
+            # delta_time_measure = time.time() - start_time_measure
+            # print(f"Removal time elapsed: {delta_time_measure * 100:2f}")
 
     def _calculate_cell_distance(self, cell):
         '''Returns distance between origins of two cells'''
@@ -119,22 +143,6 @@ def main():
     init_game()
     print("Initialized game.")
 
-    # packed_data = pack_cells(cells)
-    # cell_count = struct.unpack('I', packed_data[:4])[0]
-    # print(cell_count)
-
-    # unpacked_cells = []
-    # offset = 4  # Skip the cell count
-
-    # for i in range(cell_count):
-    #     # Unpack each cell (4 integers)
-    #     cell_data = struct.unpack('IIII', packed_data[offset:offset+16])
-    #     unpacked_cells.append(cell_data)  # (key, pos_x, pos_y, color)
-    #     offset += 16
-
-    # print(unpacked_cells)
-    # return
-
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind((HOST, PORT))
         s.listen()
@@ -143,9 +151,12 @@ def main():
             # TODO multithreading, multiple users, synchronization
             conn, addr = s.accept()
             print(f"Connected with: {addr}")
+            client_id = uuid4()
+            connections[client_id] = conn
             # TODO: move to thread
-            # Thread(target=handle_player_gameplay, args=(conn, ))
-            handle_player_gameplay(conn)
+            t = Thread(target=handle_player_gameplay, args=(conn, client_id))
+            t.start()
+            # handle_player_gameplay(conn)
 
 
 def init_game():
@@ -154,7 +165,7 @@ def init_game():
         new_cell = CellData(
             random.randint(0, map_size * 2),
             random.randint(0, map_size * 2),
-            (
+            encode_color(
                 random.randint(0, 255),
                 random.randint(0, 255),
                 random.randint(0, 255)
@@ -186,10 +197,8 @@ def validate_username(username):
 # POST
 
 
-def handle_player_gameplay(conn):
-    # TODO: send current game state
-    # TODO: ideally we want only send once all cells
-    # and then updates only
+def handle_player_gameplay(conn, client_id):
+    # TODO: send config
 
     # username
     with conn:
@@ -212,7 +221,7 @@ def handle_player_gameplay(conn):
             #     break
 
         # TODO: handle random
-        global player  # TODO: change to field
+        # global player  # TODO: change to field
         # spawn player
         player_color = (
             random.randint(0, 255),
@@ -220,7 +229,7 @@ def handle_player_gameplay(conn):
             random.randint(0, 255)
         )
 
-        player = Player(map_size / 2, map_size / 2,
+        player = Player(client_id, map_size / 2, map_size / 2,
                         player_color, "Player1", conn)
 
         # TODO -1 mouse == disconnect
@@ -237,22 +246,20 @@ def handle_player_gameplay(conn):
         # network_thread_obj.start()
 
         while True:
-            # print(player.pos_x)
             data = conn.recv(8)
             mouse_x, mouse_y = struct.unpack('ff', data)
 
             if mouse_x == -1:
                 print("Player disconnected.")
+                connections.pop(client_id)
                 break
-            # TODO: get quit event
-            # TODO: get mouse pos from player or player pos
 
             player.pos_x += ((mouse_x - WIDTH / 2) / player.radius / 2)
             player.pos_y += ((mouse_y - HEIGHT / 2) / player.radius / 2)
 
             player.collision_check()
 
-            print((player.pos_x, player.pos_y))
+            # print((player.pos_x, player.pos_y))
 
             # current_time = time.time()
             # if current_time - last_update < 1/TARGET_FPS:
