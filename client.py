@@ -14,8 +14,10 @@ HEIGHT = 720
 cells = {}
 is_alive = True
 players = {}
+current_player = None
 FONT = pygame.font.Font("freesansbold.ttf", 32)
 BIGFONT = pygame.font.Font("freesansbold.ttf", 72)
+current_client_id = -1
 
 
 HOST = "127.0.0.1"  # The server's hostname or IP address
@@ -65,9 +67,9 @@ def parse_cells_data(cell_data):
         cells[cell[0]] = new_cell
 
 
-def parse_players_data(players_data):
+def parse_players_data(players_data, current_player_username):
     for player_data in players_data:
-        username, pos_x, pos_y, color, radius = player_data
+        client_id, username, pos_x, pos_y, color, radius = player_data
         new_player = Player(
             username,
             pos_x,
@@ -75,7 +77,14 @@ def parse_players_data(players_data):
             decode_color(color),
             radius
         )
-        players[username] = new_player
+
+        if username == current_player_username:
+            global current_player, current_client_id
+            current_player = new_player
+            current_client_id = client_id
+            print(f"Current client id: {current_client_id}")
+        else:
+            players[client_id] = new_player
 
 
 data_lock = Lock()
@@ -91,15 +100,17 @@ def network_handler(conn):
     while alive:  # TODO is alive or sth
         # start_time_measure = time.time()
         try:
-            data_format = "?IIII"
+            data_format = "IIIII"
             data = receive_exact(conn, struct.calcsize(data_format))
 
-            current_client, key, new_pos_x, new_pos_y, new_color = struct.unpack(
+            event, key, new_pos_x, new_pos_y, new_color = struct.unpack(
                 data_format, data)
             # print("here2 ", (current_client, key, new_pos_x, new_pos_y, new_color))
 
-            # Remove from local cells dict
+            if event == 2:  # TODO: enums
+                ...
 
+                # Remove from local cells dict
             with data_lock:  # TODO: everywhere or concurrent map
                 cell = cells[key]
                 cell.pos_x = new_pos_x
@@ -111,8 +122,10 @@ def network_handler(conn):
                 print(
                     f"New cell was spawned: {new_pos_x}, {new_pos_y}, {new_color}")
 
-            if current_client:
-                player.radius += 0.5  # no lock, cause only this thread edits -- but other reads!
+            if event == 1:
+                global current_player
+                # TODO no lock, cause only this thread edits -- but other reads!
+                current_player.radius += 0.5
 
         except Exception as e:
             print(f"Error receiving removals: {e}")
@@ -126,7 +139,7 @@ def network_handler(conn):
 # TODO: change encoding: ascii to Unicode or UTF? short char
 
 
-def render_game(conn, username):
+def render_game(conn):
     global WIDTH, HEIGHT
     last_send_time = 0
     SEND_INTERVAL = 1/60  # 60 FPS max
@@ -142,16 +155,12 @@ def render_game(conn, username):
     CLOCK = pygame.time.Clock()
     SCREEN = pygame.display.set_mode((1280, 720), pygame.RESIZABLE)
 
-    # spawn player
-    global player
-    player = players.pop(username)
-
     # Start network thread
     network_thread_obj = Thread(
         target=network_handler, args=(conn,))
     network_thread_obj.start()
 
-    global is_alive
+    global is_alive, current_player
 
     while True:
         # start_time_measure = time.time()
@@ -178,16 +187,18 @@ def render_game(conn, username):
             conn.sendall(data)
             last_send_time = current_time
 
-        player.pos_x += ((mouse_x - WIDTH / 2) / player.radius / 2)
-        player.pos_y += ((mouse_y - HEIGHT / 2) / player.radius / 2)
+        current_player.pos_x += ((mouse_x - WIDTH / 2) /
+                                 current_player.radius / 2)
+        current_player.pos_y += ((mouse_y - HEIGHT / 2) /
+                                 current_player.radius / 2)
 
         # print(player.pos_x)
         with data_lock:
             for cell in cells.values():
                 cell.draw(
                     SCREEN,
-                    cell.pos_x - player.pos_x,
-                    cell.pos_y - player.pos_y
+                    cell.pos_x - current_player.pos_x,
+                    cell.pos_y - current_player.pos_y
                 )
 
         # TODO: lock
@@ -195,18 +206,18 @@ def render_game(conn, username):
             # print("other player: ", other_player.username)
             other_player.draw(
                 SCREEN,
-                other_player.pos_x - player.pos_x,
-                other_player.pos_y - player.pos_y
+                other_player.pos_x - current_player.pos_x,
+                other_player.pos_y - current_player.pos_y
             )
 
-        player.draw(SCREEN, (WIDTH / 2), (HEIGHT / 2))
+        current_player.draw(SCREEN, (WIDTH / 2), (HEIGHT / 2))
         # player.collision_check()
 
         # text = BIGFONT.render("Game over", False, text_color)
         # SCREEN.blit(text, (WIDTH / 2 - 150, HEIGHT / 2 - 40))
 
         text = FONT.render(
-            "Mass: " + str((player.radius)), False, text_color)
+            "Mass: " + str((current_player.radius)), False, text_color)
         SCREEN.blit(text, (20, 20))
 
         counter += 1
@@ -222,7 +233,7 @@ def render_game(conn, username):
         CLOCK.tick(FPS)
         SCREEN.fill(background_color)
 
-        # print((player.pos_x, player.pos_y))
+        # print((current_player.pos_x, current_player.pos_y))
 
         # delta_time_measure = time.time() - start_time_measure
         # print(f"Time elapsed: {delta_time_measure * 100:2f}")
@@ -232,8 +243,8 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     s.connect((HOST, PORT))
     print("Connected")
 
-    response = ""
     username = ""
+    response = ""
     request = receive_message(s)
     while request == "GET username":
         print("Type username: ")
@@ -260,10 +271,10 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         elif request == "POST players":
             received_players = unpack_players(s)
             print("Received players: ", received_players)
-            parse_players_data(received_players)
+            parse_players_data(received_players, username)
         else:
             print("An error occurred")
             print(request)
             # sys.exit()
 
-    render_game(s, username)
+    render_game(s)

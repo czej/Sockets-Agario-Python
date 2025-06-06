@@ -27,6 +27,7 @@ PORT = 9999
 
 players = {}  # player_name, player_obj
 connections = {}  # client_id, conn
+connections_lock = Lock()
 
 # @dataclass -- ideally, but I'll convert it to Java anyways
 # TODO: arrays + ?id
@@ -41,12 +42,21 @@ class CellData():
 # EW. TODO: if split then player is represented by many visual cells
 
 
-def notify_all_clients(format: str, current_client_id: uuid4, *data):
+def notify_all_clients(format: str, current_client_id: uuid4, event: int, *data):
     # TODO: connections lock
-    for key, conn in connections.items():
-        # TODO: consider ? -> I and use it as a communication
-        conn.sendall(struct.pack(
-            "?" + format, bool(key == current_client_id), *data))
+    send_format = "I" + format
+    if event == 0:
+        with connections_lock:
+            for key, conn in connections.items():
+                send_event = event
+
+                # cell eaten by current or another player
+                if send_event == 0 and key == current_client_id:
+                    send_event = 1
+
+                conn.sendall(struct.pack(
+                    send_format, send_event, *data))
+
 
 # 4 ? eaten another player
 # 3 == collision with another player
@@ -88,7 +98,7 @@ class Player(CellData):
                         (key, new_pos_x, new_pos_y, new_color))
                     # TODO: this
                     notify_all_clients(
-                        "IIII", self.client_id, key, new_pos_x, new_pos_y, new_color)
+                        "IIII", self.client_id, 0, key, new_pos_x, new_pos_y, new_color)
                     self.radius += 0.5
 
                     print(f"Player: {self.pos_x}, {self.pos_y}, Cell: ",
@@ -142,6 +152,7 @@ class Player(CellData):
 def main():
     print("Server is running.")
     init_game()
+    player_counter = 0
     print("Initialized game.")
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -152,9 +163,10 @@ def main():
             # TODO multithreading, multiple users, synchronization
             conn, addr = s.accept()
             print(f"Connected with: {addr}")
-            client_id = uuid4()
+            player_counter += 1
+            client_id = player_counter
             connections[client_id] = conn
-            # TODO: move to thread
+
             t = Thread(target=handle_player_gameplay, args=(conn, client_id))
             t.start()
             # handle_player_gameplay(conn)
@@ -201,7 +213,8 @@ def spawn_player(client_id, conn, username) -> Player:
     )
 
     return Player(
-        client_id, map_size / 2, map_size / 2,
+        client_id, random.randint(
+            0, map_size * 2), random.randint(0, map_size * 2),  # TODO: why x2
         player_color, username, conn)
 
 # GET
@@ -243,9 +256,11 @@ def handle_player_gameplay(conn, client_id):
         send_message(conn, "POST cells")
         send_cells(conn, cells)
 
-        # TODO send players
+        # send players (containing current player)
         send_message(conn, "POST players")
         send_players(conn, players)
+
+        # TODO: notify other players about new player
 
         last_update = time.time()
         # TARGET_FPS = 15
@@ -261,7 +276,7 @@ def handle_player_gameplay(conn, client_id):
             mouse_x, mouse_y = struct.unpack('ff', data)
 
             if mouse_x == -1:
-                print("Player disconnected.")
+                print(f"Player {username} disconnected.")
                 connections.pop(client_id)
                 break
 
@@ -269,6 +284,10 @@ def handle_player_gameplay(conn, client_id):
             player.pos_y += ((mouse_y - HEIGHT / 2) / player.radius / 2)
 
             player.collision_check()
+
+            # ? TODO: send only if close (remember about scale)
+            # TODO: consider changing to id instead username
+            notify_all_clients('ff', client_id, 2, mouse_x, mouse_y)
 
             # print((player.pos_x, player.pos_y))
 

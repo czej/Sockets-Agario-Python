@@ -44,6 +44,7 @@ def _pack_players(players):
     for username, player in players.items():
         # Pack each cell as 4 unsigned integers
         # TODO: consider shorts
+        packed_data += struct.pack("I", player.client_id)
         encoded_username = username.encode("ascii")
 
         packed_data += struct.pack('I', len(encoded_username))
@@ -166,18 +167,24 @@ def unpack_players(sock):
         offset = 4  # Skip the cell count
 
         for _ in range(count):
-            # Unpack each cell (4 integers)
+            client_id = struct.unpack(
+                'I', packed_data[offset:offset + struct.calcsize('I')])[0]
+            offset += struct.calcsize('I')
+
             username_length = struct.unpack(
-                'I', packed_data[offset:offset + 4])[0]
-            offset += 4
+                'I', packed_data[offset:offset + struct.calcsize('I')])[0]
+            offset += struct.calcsize('I')
+
             username = packed_data[offset:offset +
                                    username_length].decode('ascii')
             offset += username_length
+
             player_data = struct.unpack(
-                'ffIf', packed_data[offset:offset + 16])
-            # (username, pos_x, pos_y, color, radius)
-            players.append((username, *player_data))
-            offset += 16
+                'ffIf', packed_data[offset:offset + struct.calcsize('ffIf')])
+            offset += struct.calcsize('ffIf')
+
+            # (client_id, username, pos_x, pos_y, color, radius)
+            players.append((client_id, username, *player_data))
 
         return players
     except Exception as e:
