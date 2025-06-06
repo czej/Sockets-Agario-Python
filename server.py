@@ -4,8 +4,7 @@ import time
 from threading import Thread, Lock
 import re
 import struct
-from newtork_utils import send_cells, send_message, encode_color, send_players
-from uuid import uuid4
+from newtork_utils import send_cells, send_message, encode_color, send_players, pack_player
 
 cell_count = 2000
 map_size = 4000
@@ -42,22 +41,29 @@ class CellData():
 # EW. TODO: if split then player is represented by many visual cells
 
 
-def notify_all_clients(format: str, current_client_id: uuid4, event: int, *data):
+def notify_all_clients(*data, event: int, format: str | None = "", current_client_id: int | None = None, packed_data: bytes | None = None):
     # TODO: connections lock
     send_format = "I" + format
-    if event == 0:
-        with connections_lock:
-            for key, conn in connections.items():
-                send_event = event
+    with connections_lock:
+        for key, conn in connections.items():
+            send_event = event
 
-                # cell eaten by current or another player
-                if send_event == 0 and key == current_client_id:
-                    send_event = 1
+            # cell eaten by current or another player
+            if send_event == 0 and key == current_client_id:
+                send_event = 1
 
+            elif send_event in (2, 5) and key == current_client_id:
+                continue
+
+            if packed_data == None:
                 conn.sendall(struct.pack(
                     send_format, send_event, *data))
+            else:
+                conn.sendall(struct.pack(
+                    send_format, send_event) + packed_data)
 
 
+# 5 == new player
 # 4 ? eaten another player
 # 3 == collision with another player
 # 2 == another player has moved
@@ -70,7 +76,7 @@ class Player(CellData):
         super().__init__(x, y, color)
         self.client_id = client_id
         self.radius = PLAYER_SPAWN_RADIUS
-        self.name = name
+        self.username = name
         self.conn = conn
 
     def collision_check(self):
@@ -98,7 +104,8 @@ class Player(CellData):
                         (key, new_pos_x, new_pos_y, new_color))
                     # TODO: this
                     notify_all_clients(
-                        "IIII", self.client_id, 0, key, new_pos_x, new_pos_y, new_color)
+                        key, new_pos_x, new_pos_y, new_color,
+                        format="IIII", current_client_id=self.client_id, event=0)
                     self.radius += 0.5
 
                     print(f"Player: {self.pos_x}, {self.pos_y}, Cell: ",
@@ -165,7 +172,6 @@ def main():
             print(f"Connected with: {addr}")
             player_counter += 1
             client_id = player_counter
-            connections[client_id] = conn
 
             t = Thread(target=handle_player_gameplay, args=(conn, client_id))
             t.start()
@@ -261,6 +267,9 @@ def handle_player_gameplay(conn, client_id):
         send_players(conn, players)
 
         # TODO: notify other players about new player
+        player = players[username]
+        notify_all_clients(packed_data=pack_player(player, add_length=True), current_client_id=client_id,
+                           event=5)
 
         last_update = time.time()
         # TARGET_FPS = 15
@@ -269,7 +278,8 @@ def handle_player_gameplay(conn, client_id):
         #     target=network_handler, args=(conn,), daemon=True)
         # network_thread_obj.start()
 
-        player = players[username]
+        # TODO: Lock()
+        connections[client_id] = conn
 
         while True:
             data = conn.recv(8)
@@ -278,6 +288,7 @@ def handle_player_gameplay(conn, client_id):
             if mouse_x == -1:
                 print(f"Player {username} disconnected.")
                 connections.pop(client_id)
+                # TODO: handle
                 break
 
             player.pos_x += ((mouse_x - WIDTH / 2) / player.radius / 2)
@@ -285,9 +296,9 @@ def handle_player_gameplay(conn, client_id):
 
             player.collision_check()
 
-            # ? TODO: send only if close (remember about scale)
-            # TODO: consider changing to id instead username
-            notify_all_clients('ff', client_id, 2, mouse_x, mouse_y)
+            # ? TODO: send only if close position (remember about scale)
+            notify_all_clients(client_id, player.pos_x, player.pos_y, player.radius, format="Ifff",
+                               current_client_id=client_id, event=2)
 
             # print((player.pos_x, player.pos_y))
 

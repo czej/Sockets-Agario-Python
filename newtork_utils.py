@@ -34,6 +34,22 @@ def send_cells(sock, cells):
         return False
 
 
+def pack_player(player, add_length: bool | None = False):
+    # TODO: consider shorts
+    packed_player = struct.pack("I", player.client_id)
+    encoded_username = player.username.encode("ascii")
+
+    packed_player += struct.pack('I', len(encoded_username))
+    packed_player += encoded_username
+    packed_player += struct.pack('ffIf', player.pos_x,
+                                 player.pos_y, player.color, player.radius)
+    
+    if add_length:
+        packed_player = struct.pack("I", len(packed_player)) + packed_player
+
+    return packed_player
+
+
 def _pack_players(players):
     """
     Pack cell data into binary format for efficient transmission
@@ -41,16 +57,8 @@ def _pack_players(players):
     """
     packed_data = struct.pack('I', len(players))  # Number of players
 
-    for username, player in players.items():
-        # Pack each cell as 4 unsigned integers
-        # TODO: consider shorts
-        packed_data += struct.pack("I", player.client_id)
-        encoded_username = username.encode("ascii")
-
-        packed_data += struct.pack('I', len(encoded_username))
-        packed_data += encoded_username
-        packed_data += struct.pack('ffIf', player.pos_x,
-                                   player.pos_y, player.color, player.radius)
+    for player in players.values():
+        packed_data += pack_player(player)
 
     return packed_data
 
@@ -147,6 +155,28 @@ def unpack_cells(sock):
         return []
 
 
+def unpack_player(packed_data: bytes, start_offset: int | None = 0):
+    # TODO: consider shorts
+    offset = start_offset
+    client_id = struct.unpack(
+        'I', packed_data[offset:offset + struct.calcsize('I')])[0]
+    offset += struct.calcsize('I')
+
+    username_length = struct.unpack(
+        'I', packed_data[offset:offset + struct.calcsize('I')])[0]
+    offset += struct.calcsize('I')
+
+    username = packed_data[offset:offset +
+                           username_length].decode('ascii')
+    offset += username_length
+
+    player_data = struct.unpack(
+        'ffIf', packed_data[offset:offset + struct.calcsize('ffIf')])
+    offset += struct.calcsize('ffIf')
+
+    return (client_id, username, *player_data), offset
+
+
 def unpack_players(sock):
     """
     Receive and unpack cell data from socket
@@ -167,24 +197,11 @@ def unpack_players(sock):
         offset = 4  # Skip the cell count
 
         for _ in range(count):
-            client_id = struct.unpack(
-                'I', packed_data[offset:offset + struct.calcsize('I')])[0]
-            offset += struct.calcsize('I')
-
-            username_length = struct.unpack(
-                'I', packed_data[offset:offset + struct.calcsize('I')])[0]
-            offset += struct.calcsize('I')
-
-            username = packed_data[offset:offset +
-                                   username_length].decode('ascii')
-            offset += username_length
-
-            player_data = struct.unpack(
-                'ffIf', packed_data[offset:offset + struct.calcsize('ffIf')])
-            offset += struct.calcsize('ffIf')
-
             # (client_id, username, pos_x, pos_y, color, radius)
-            players.append((client_id, username, *player_data))
+            data, new_offset = unpack_player(
+                packed_data=packed_data, start_offset=offset)
+            offset = new_offset
+            players.append(data)
 
         return players
     except Exception as e:

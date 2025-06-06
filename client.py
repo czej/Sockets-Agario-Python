@@ -5,7 +5,7 @@ import time
 import sys
 from threading import Thread, Lock
 from pygame.locals import QUIT, MOUSEMOTION
-from newtork_utils import decode_color, receive_message, unpack_cells, receive_exact, unpack_players
+from newtork_utils import decode_color, receive_message, unpack_cells, receive_exact, unpack_players, unpack_player
 
 pygame.init()
 
@@ -100,32 +100,62 @@ def network_handler(conn):
     while alive:  # TODO is alive or sth
         # start_time_measure = time.time()
         try:
-            data_format = "IIIII"
-            data = receive_exact(conn, struct.calcsize(data_format))
+            event_data = receive_exact(conn, struct.calcsize("I"))
+            event = struct.unpack("I", event_data)[0]
+            print("Event: ", event)
 
-            event, key, new_pos_x, new_pos_y, new_color = struct.unpack(
-                data_format, data)
             # print("here2 ", (current_client, key, new_pos_x, new_pos_y, new_color))
 
             if event == 2:  # TODO: enums
-                ...
+                data_format = "Ifff"  # TODO: this should be also in enum
+                data = receive_exact(conn, struct.calcsize(data_format))
+                client_id, new_pos_x, new_pos_y, new_radius = struct.unpack(data_format, data)
 
-                # Remove from local cells dict
-            with data_lock:  # TODO: everywhere or concurrent map
-                cell = cells[key]
-                cell.pos_x = new_pos_x
-                cell.pos_y = new_pos_y
-                cell.color = decode_color(new_color)
+                # TODO: Lock()
+                player = players[client_id]
+                player.pos_x = new_pos_x
+                player.pos_y = new_pos_y
+                player.radius = new_radius
 
-                cells[key] = cell  # TODO: is this needed?
-                print(f"Removed cell: {key}")
                 print(
-                    f"New cell was spawned: {new_pos_x}, {new_pos_y}, {new_color}")
+                    f"New pos: {new_pos_x}, {new_pos_y}, {new_radius}")
 
-            if event == 1:
-                global current_player
-                # TODO no lock, cause only this thread edits -- but other reads!
-                current_player.radius += 0.5
+            elif event == 5:
+                length_data = receive_exact(conn, 4)
+                data_length = struct.unpack('I', length_data)[0]
+                packed_data = receive_exact(conn, data_length)
+                (client_id, username, pos_x, pos_y, color, radius), _ = unpack_player(packed_data=packed_data) 
+                print(f"New player has joined: {username}")
+                new_player = Player(
+                    username,
+                    pos_x,
+                    pos_y,
+                    decode_color(color),
+                    radius
+                )
+                players[client_id] = new_player
+
+            elif event in (0, 1):
+                data_format = "IIII"
+                data = receive_exact(conn, struct.calcsize(data_format))
+                key, new_pos_x, new_pos_y, new_color = struct.unpack(
+                    data_format, data)
+                # Remove from local cells dict
+                with data_lock:  # TODO: everywhere or concurrent map
+                    cell = cells[key]
+                    cell.pos_x = new_pos_x
+                    cell.pos_y = new_pos_y
+                    cell.color = decode_color(new_color)
+
+                    cells[key] = cell  # TODO: is this needed?
+                    print(f"Removed cell: {key}")
+                    print(
+                        f"New cell was spawned: {new_pos_x}, {new_pos_y}, {new_color}")
+
+                if event == 1:
+                    global current_player
+                    # TODO no lock, cause only this thread edits -- but other reads!
+                    current_player.radius += 0.5
 
         except Exception as e:
             print(f"Error receiving removals: {e}")
@@ -269,6 +299,7 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             print("Received cells:", received_cells)
             parse_cells_data(received_cells)
         elif request == "POST players":
+            print("here2")
             received_players = unpack_players(s)
             print("Received players: ", received_players)
             parse_players_data(received_players, username)
