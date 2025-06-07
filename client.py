@@ -145,7 +145,7 @@ def network_handler(conn):
                     cell.pos_y = new_pos_y
                     cell.color = decode_color(new_color)
 
-                    cells[key] = cell  # TODO: is this needed?
+                    # cells[key] = cell  # TODO: is this needed?
                     print(f"Removed cell: {key}")
                     print(
                         f"New cell was spawned: {new_pos_x}, {new_pos_y}, {new_color}")

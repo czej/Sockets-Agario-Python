@@ -33,12 +33,19 @@ class CellData():
         self.pos_x = x
         self.pos_y = y
 
-# EW. TODO: if split then player is represented by many visual cells
+
+def notify_client(*data, conn: socket, event: int, format: str | None = "", packed_data: bytes | None = None):
+    send_format = "I" + format
+    if packed_data == None:
+        conn.sendall(struct.pack(
+            send_format, event, *data))
+    else:
+        conn.sendall(struct.pack(
+            send_format, event) + packed_data)
 
 
 def notify_all_clients(*data, event: int, format: str | None = "", current_client_id: int | None = None, packed_data: bytes | None = None):
     # TODO: connections lock
-    send_format = "I" + format
     with connections_lock:
         for key, conn in connections.items():
             send_event = event
@@ -50,17 +57,15 @@ def notify_all_clients(*data, event: int, format: str | None = "", current_clien
             elif send_event in (2, 5) and key == current_client_id:
                 continue
 
-            if packed_data == None:
-                conn.sendall(struct.pack(
-                    send_format, send_event, *data))
-            else:
-                conn.sendall(struct.pack(
-                    send_format, send_event) + packed_data)
+            notify_client(*data, conn=conn, event=send_event, format=format, packed_data=packed_data)
+
+# 3 == collision with another player (==) -- not needed
 
 
-# 5 == new player
-# 4 ? eaten another player
-# 3 == collision with another player
+
+# 5 == new player has joined
+# 4 == game over - was eaten by another player
+# 3 == other player was eaten
 # 2 == another player has moved
 # 1 == cell eaten by current_player
 # 0 == cell eaten by different player
@@ -96,11 +101,39 @@ class Player(CellData):
             for new_cell_values in cells_to_reuse:
                 self._reuse_cell(new_cell_values)
         
-        # TODO: not with self
+        
         # with players_lock:
-        #     for client_id, player in players.items():
-        #         if self._collides_with(player):
-        #             print(f"Player collision: {player.username}" )
+        #     for username, other_player in players.items():
+        #         if other_player.client_id == self.client_id:
+        #             continue
+
+        #         if self._collides_with(other_player):
+        #             print(f"Player collision: {other_player.username}" )
+        #             winner, defeated = None, None
+        #             if self.radius > other_player.radius * 1.15:
+        #                 winner = self
+        #                 defeated = other_player
+        #             elif other_player.radius > self.radius * 1.15:
+        #                 winner = other_player
+        #                 defeated = self
+        #             else:
+        #                 continue
+
+        #             winner.radius += defeated.radius
+
+        #             # TODO: handle game over for defeated - disconnect
+        #             # remove all data (modify connection out of this scope to avoid deadlock!)
+
+        #             # others + winning player:
+        #             # defeated: get client id to remove
+        #             # won: get client_id, new radius
+        #             notify_all_clients(
+        #                 defeated.client_id, winner.client_id, winner.radius,
+        #                 format="III", current_client_id=self.client_id, event=3)
+
+        #             # defeated player:
+        #             # send game over
+        #             notify_client(conn=defeated.conn, format="", current_client_id=self.client_id, event=4)
         
 
     def _calculate_distance(self, cell):
@@ -116,12 +149,12 @@ class Player(CellData):
     def _generate_new_cell_values(self, cell):
             new_pos_x, new_pos_y = random.randint(0, MAP_SIZE), random.randint(0, MAP_SIZE)
 
-            # new_color = encode_color(
-            #     random.randint(0, 255),
-            #     random.randint(0, 255),
-            #     random.randint(0, 255)
-            # )
-            new_color = encode_color(255, 0, 255)  # TODO temp
+            new_color = encode_color(
+                random.randint(0, 255),
+                random.randint(0, 255),
+                random.randint(0, 255)
+            )
+            
             print(f"Player: {self.pos_x}, {self.pos_y}, Cell: ",
                     cell.pos_x, cell.pos_y)
 
@@ -136,7 +169,7 @@ class Player(CellData):
         cell.pos_y = new_pos_y
         cell.color = new_color
 
-        cells[key] = cell  # TODO: is this needed?
+        # cells[key] = cell  # TODO: is this needed?
 
 
 
