@@ -1,4 +1,14 @@
 import struct
+import socket
+
+def notify_client(*data, conn: socket, event: int, format: str | None = "", packed_data: bytes | None = None):
+    send_format = "I" + format
+    if packed_data == None:
+        conn.sendall(struct.pack(
+            send_format, event, *data))
+    else:
+        conn.sendall(struct.pack(
+            send_format, event) + packed_data)
 
 
 def _pack_cells(cells):

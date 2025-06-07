@@ -2,34 +2,31 @@ import socket
 import struct
 import pygame
 import time
-import sys
 from threading import Thread, Lock
 from pygame.locals import QUIT, MOUSEMOTION
 from newtork_utils import decode_color, receive_message, unpack_cells, receive_exact, unpack_players, unpack_player
 
 pygame.init()
 
-WIDTH = 1280
-HEIGHT = 720
-cells = {}
-cells_lock = Lock()  # OK
-alive_lock = Lock()
-is_alive = True
-players = {}
-current_player = None
-FONT = pygame.font.Font("freesansbold.ttf", 32)
-BIGFONT = pygame.font.Font("freesansbold.ttf", 72)
-current_client_id = -1
-
-
 HOST = "127.0.0.1"  # The server's hostname or IP address
 PORT = 9999  # The port used by the server
 
+WIDTH = 1280
+HEIGHT = 720
+FONT = pygame.font.Font("freesansbold.ttf", 32)
+BIGFONT = pygame.font.Font("freesansbold.ttf", 72)
+
 # TODO: from config
-player_color = (255, 0, 0)
-background_color = (0, 0, 0)
+background_color = (15, 15, 15)
 text_color = (255, 255, 255)
 spawn_size = 35
+
+cells = {}
+cells_lock = Lock()  # OK
+players = {}
+players_lock = Lock()  # OK
+current_player = None
+current_client_id = -1
 
 
 class Cell():
@@ -91,29 +88,22 @@ def parse_players_data(players_data, current_player_username):
 
 def network_handler(conn):
     """Receive and process cell removal data"""
-    with alive_lock:
-        global is_alive
-        alive = is_alive
-
-    while alive:  # TODO is alive or sth
-        # start_time_measure = time.time()
+    while True:
         try:
             event_data = receive_exact(conn, struct.calcsize("I"))
             event = struct.unpack("I", event_data)[0]
             print("Event: ", event)
-
-            # print("here2 ", (current_client, key, new_pos_x, new_pos_y, new_color))
 
             if event == 2:  # TODO: enums
                 data_format = "Ifff"  # TODO: this should be also in enum
                 data = receive_exact(conn, struct.calcsize(data_format))
                 client_id, new_pos_x, new_pos_y, new_radius = struct.unpack(data_format, data)
 
-                # TODO: Lock()
-                player = players[client_id]
-                player.pos_x = new_pos_x
-                player.pos_y = new_pos_y
-                player.radius = new_radius
+                with players_lock:
+                    player = players[client_id]
+                    player.pos_x = new_pos_x
+                    player.pos_y = new_pos_y
+                    player.radius = new_radius
 
                 print(
                     f"New pos: {new_pos_x}, {new_pos_y}, {new_radius}")
@@ -131,7 +121,16 @@ def network_handler(conn):
                     decode_color(color),
                     radius
                 )
-                players[client_id] = new_player
+
+                with players_lock:
+                    players[client_id] = new_player
+
+            elif event == 7:
+                data_format = "I"
+                data = receive_exact(conn, struct.calcsize(data_format))
+                client_id = struct.unpack(data_format, data)[0]
+                with players_lock:
+                    players.pop(client_id)
 
             elif event in (0, 1):
                 data_format = "IIII"
@@ -158,13 +157,8 @@ def network_handler(conn):
                     current_player.radius += 0.5
 
         except Exception as e:
-            print(f"Error receiving removals: {e}")
-            # TODO: receive stats here
-        # delta_time_measure = time.time() - start_time_measure
-        # print(f"Net Time elapsed: {delta_time_measure * 100:2f}")
-
-        with alive_lock:
-            alive = is_alive
+            print(f"Error receiving event or client quitted: {e}")
+            break
 
 # TODO: change encoding: ascii to Unicode or UTF? short char
 
@@ -190,7 +184,7 @@ def render_game(conn):
         target=network_handler, args=(conn,))
     network_thread_obj.start()
 
-    global is_alive, current_player
+    global current_player
 
     while True:
         # start_time_measure = time.time()
@@ -200,12 +194,10 @@ def render_game(conn):
         for event in pygame.event.get():
             if event.type == QUIT:
                 pygame.quit()
-                with alive_lock:
-                    is_alive = False
-                data = struct.pack('ff', -1, -1)
+                data = struct.pack('ff', 999999, 0)
                 conn.sendall(data)
                 return
-            if event.type == MOUSEMOTION and is_alive:
+            if event.type == MOUSEMOTION:
                 mouse_x, mouse_y = event.pos
             else:
                 mouse_x = WIDTH / 2
@@ -231,17 +223,16 @@ def render_game(conn):
                     cell.pos_y - current_player.pos_y + HEIGHT / 2
                 )
 
-        # TODO: lock
-        for other_player in players.values():
-            # print("other player: ", other_player.username)
-            other_player.draw(
-                SCREEN,
-                other_player.pos_x - current_player.pos_x + WIDTH / 2,
-                other_player.pos_y - current_player.pos_y + HEIGHT / 2
-            )
+        with players_lock:
+            for other_player in players.values():
+                # print("other player: ", other_player.username)
+                other_player.draw(
+                    SCREEN,
+                    other_player.pos_x - current_player.pos_x + WIDTH / 2,
+                    other_player.pos_y - current_player.pos_y + HEIGHT / 2
+                )
 
         current_player.draw(SCREEN, (WIDTH / 2), (HEIGHT / 2))
-        # player.collision_check()
 
         # text = BIGFONT.render("Game over", False, text_color)
         # SCREEN.blit(text, (WIDTH / 2 - 150, HEIGHT / 2 - 40))
@@ -263,10 +254,7 @@ def render_game(conn):
         CLOCK.tick(FPS)
         SCREEN.fill(background_color)
 
-        print((current_player.pos_x, current_player.pos_y))
-
-        # delta_time_measure = time.time() - start_time_measure
-        # print(f"Time elapsed: {delta_time_measure * 100:2f}")
+        # print((current_player.pos_x, current_player.pos_y))
 
 
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:

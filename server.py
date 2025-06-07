@@ -4,7 +4,7 @@ import time
 from threading import Thread, Lock
 import re
 import struct
-from newtork_utils import send_cells, send_message, encode_color, send_players, pack_player
+from newtork_utils import send_cells, send_message, encode_color, send_players, pack_player, notify_client
 
 
 HOST = "127.0.0.1"
@@ -16,13 +16,13 @@ PLAYER_SPAWN_RADIUS = 35
 CELL_RADIUS = 10
 
 cells = {} 
-cells_lock = Lock()
+cells_lock = Lock()  # OK
 
 players = {}  # player_name, player_obj
 players_lock = Lock()  # OK
 
 connections = {}  # client_id, conn
-connections_lock = Lock()
+connections_lock = Lock() # OK
 
 # @dataclass -- ideally, but I'll convert it to Java anyways
 
@@ -34,18 +34,8 @@ class CellData():
         self.pos_y = y
 
 
-def notify_client(*data, conn: socket, event: int, format: str | None = "", packed_data: bytes | None = None):
-    send_format = "I" + format
-    if packed_data == None:
-        conn.sendall(struct.pack(
-            send_format, event, *data))
-    else:
-        conn.sendall(struct.pack(
-            send_format, event) + packed_data)
-
 
 def notify_all_clients(*data, event: int, format: str | None = "", current_client_id: int | None = None, packed_data: bytes | None = None):
-    # TODO: connections lock
     with connections_lock:
         for key, conn in connections.items():
             send_event = event
@@ -62,7 +52,7 @@ def notify_all_clients(*data, event: int, format: str | None = "", current_clien
 # 3 == collision with another player (==) -- not needed
 
 
-
+# 7 == player has quit
 # 5 == new player has joined
 # 4 == game over - was eaten by another player
 # 3 == other player was eaten
@@ -102,38 +92,38 @@ class Player(CellData):
                 self._reuse_cell(new_cell_values)
         
         
-        # with players_lock:
-        #     for username, other_player in players.items():
-        #         if other_player.client_id == self.client_id:
-        #             continue
+        with players_lock:
+            for username, other_player in players.items():
+                if other_player.client_id == self.client_id:
+                    continue
 
-        #         if self._collides_with(other_player):
-        #             print(f"Player collision: {other_player.username}" )
-        #             winner, defeated = None, None
-        #             if self.radius > other_player.radius * 1.15:
-        #                 winner = self
-        #                 defeated = other_player
-        #             elif other_player.radius > self.radius * 1.15:
-        #                 winner = other_player
-        #                 defeated = self
-        #             else:
-        #                 continue
+                if self._collides_with(other_player):
+                    print(f"Player collision: {other_player.username}" )
+                    winner, defeated = None, None
+                    if self.radius > other_player.radius * 1.15:
+                        winner = self
+                        defeated = other_player
+                    elif other_player.radius > self.radius * 1.15:
+                        winner = other_player
+                        defeated = self
+                    else:
+                        continue
 
-        #             winner.radius += defeated.radius
+                    winner.radius += defeated.radius
 
-        #             # TODO: handle game over for defeated - disconnect
-        #             # remove all data (modify connection out of this scope to avoid deadlock!)
+                    # TODO: handle game over for defeated - disconnect
+                    # remove all data (modify connection out of this scope to avoid deadlock!)
 
-        #             # others + winning player:
-        #             # defeated: get client id to remove
-        #             # won: get client_id, new radius
-        #             notify_all_clients(
-        #                 defeated.client_id, winner.client_id, winner.radius,
-        #                 format="III", current_client_id=self.client_id, event=3)
+                    # others + winning player:
+                    # defeated: get client id to remove
+                    # won: get client_id, new radius
+                    notify_all_clients(
+                        defeated.client_id, winner.client_id, winner.radius,
+                        format="III", current_client_id=self.client_id, event=3)
 
-        #             # defeated player:
-        #             # send game over
-        #             notify_client(conn=defeated.conn, format="", current_client_id=self.client_id, event=4)
+                    # defeated player:
+                    # send game over
+                    notify_client(conn=defeated.conn, format="", current_client_id=self.client_id, event=4)
         
 
     def _calculate_distance(self, cell):
@@ -168,8 +158,6 @@ class Player(CellData):
         cell.pos_x = new_pos_x
         cell.pos_y = new_pos_y
         cell.color = new_color
-
-        # cells[key] = cell  # TODO: is this needed?
 
 
 
@@ -208,6 +196,7 @@ def init_game():
                 random.randint(0, 255)
             ),
         )
+        # lock not needed
         cells[i] = new_cell
 
 
@@ -217,8 +206,11 @@ USERNAME_MAX_LENGTH = 50
 
 
 def validate_username(username):
+    if username is None or len(username) < 1:
+        return "Username is too short. Minimum characters is 1."
+    
     if len(username) > 50:
-        return "Username is too long."
+        return "Username is too long. Maximum characters is 50."
 
     if not re.match(VALID_USERNAME_CHARACTERS, username):
         return INVALID_USERNAME_MESSAGE
@@ -262,22 +254,26 @@ def handle_player_gameplay(conn, client_id):
         while True:
             print("Asking for username...")
             send_message(conn, "GET username")
-            username = conn.recv(1024).decode('ascii')
+            username = conn.recv(1024).decode('ascii').strip()
             players_lock.acquire()
-            if (msg := validate_username(username)) != "OK":
-                # TODO: is it ok? maybe use enums for this method?
+            try:
+                if (msg := validate_username(username)) != "OK":
+                    # TODO: is it ok? maybe use enums for this method?
+                    players_lock.release()
+                    send_message(conn, "ERROR " + msg)
+                    continue
+                else:
+                    # spawn player
+                    # TODO: lock on this action - checking and adding username to map
+                    # TODO: remove player and cleanup - even if connection was broken
+                    # TODO: make this player inactive until renders
+                    players[username] = spawn_player(client_id, conn, username)
+                    players_lock.release()
+                    print(f"Player {username} has joined the game.")
+                    send_message(conn, "INFO Successfully connected to the game.")
+                    break
+            except:
                 players_lock.release()
-                send_message(conn, "ERROR " + msg)
-                continue
-            else:
-                # spawn player
-                # TODO: lock on this action - checking and adding username to map
-                # TODO: remove player and cleanup - even if connection was broken
-                # TODO: make this player inactive until renders
-                players[username] = spawn_player(client_id, conn, username)
-                players_lock.release()
-                print(f"Player {username} has joined the game.")
-                send_message(conn, "INFO Successfully connected to the game.")
                 break
 
             # TODO: handle no data == null
@@ -300,19 +296,25 @@ def handle_player_gameplay(conn, client_id):
         notify_all_clients(packed_data=pack_player(player, add_length=True), current_client_id=client_id,
                            event=5)
 
-        # TODO: Lock()
-        connections[client_id] = conn
+        with connections_lock:
+            connections[client_id] = conn
 
         while True:
             data = conn.recv(8)
             mouse_x, mouse_y = struct.unpack('ff', data)
 
-            # TODO - this cannot be -1! -- but can be -999999
-            # if mouse_x == -1:
-            #     print(f"Player {username} disconnected.")
-            #     connections.pop(client_id)
-            #     # TODO: handle
-            #     break
+            # print((mouse_x, mouse_y))
+
+            if mouse_x == 999999:
+                print(f"Player {username} disconnected.")
+                with connections_lock:
+                    connections.pop(client_id)
+                
+                with players_lock:
+                    players.pop(player.username)
+                
+                notify_all_clients(client_id, format="I", event=7)
+                break
 
             player.pos_x += (mouse_x / player.radius / 2)
             player.pos_y += (mouse_y / player.radius / 2)
