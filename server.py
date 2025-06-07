@@ -11,22 +11,19 @@ map_size = 4000
 PLAYER_SPAWN_RADIUS = 35
 CELL_RADIUS = 10
 
-# ugly, but should work faster
-# Cell(pos_x, pos_y, color) + id -- natural number / arr indx
-# we can split it into 2 1d array [pos_x, pos_y], [color]
-# or everything in one array - colors are just numbers; those can be even encoded ()_255 == 255*255^2 + 255*255 + 255
-cells = {}  # TODO: cell can be also another player? -- better split
+cells = {} 
 cells_lock = Lock()
 
 HOST = "127.0.0.1"
 PORT = 9999
 
 players = {}  # player_name, player_obj
+players_lock = Lock()
+
 connections = {}  # client_id, conn
 connections_lock = Lock()
 
 # @dataclass -- ideally, but I'll convert it to Java anyways
-# TODO: arrays + ?id
 
 
 class CellData():
@@ -78,49 +75,27 @@ class Player(CellData):
 
     def collision_check(self):
         cells_to_reuse = []
-        # start_time_measure = time.time()
+        
         # TODO: if too slow try changing iteration strategy
-        # 1 map batches - only ~1000 closest
+        # 1 map batches - only ~1000 closest  // not now
         # keys are natural nums, so while loop will be ok also
-        # + cell pool or instant respawn for now
         # --> always same num of cells, just change pos (send new pos for id)
         # => acquring lock on one item, not the whole map :)
         with cells_lock:
             for key, cell in cells.items():
                 if self._collides_with(cell):
-                    new_pos_x, new_pos_y = random.randint(
-                        0, map_size * 2), random.randint(0, map_size * 2)
-
-                    new_color = encode_color(
-                        random.randint(0, 255),
-                        random.randint(0, 255),
-                        random.randint(0, 255)
-                    )
-
-                    cells_to_reuse.append(
-                        (key, new_pos_x, new_pos_y, new_color))
-                    # TODO: this
+                    new_pos_x, new_pos_y, new_color = self._generate_new_cell_values(cell)
+                    cells_to_reuse.append((key, new_pos_x, new_pos_y, new_color))
                     notify_all_clients(
                         key, new_pos_x, new_pos_y, new_color,
                         format="IIII", current_client_id=self.client_id, event=0)
+            
                     self.radius += 0.5
 
-                    print(f"Player: {self.pos_x}, {self.pos_y}, Cell: ",
-                          cell.pos_x, cell.pos_y)
-
-                    print("New cell: ", (key, new_pos_x, new_pos_y, new_color))
-
             for new_cell_values in cells_to_reuse:
-                key, new_pos_x, new_pos_y, new_color = new_cell_values
-                cell = cells[key]
-                cell.pos_x = new_pos_x
-                cell.pos_y = new_pos_y
-                cell.color = new_color
-
-                cells[key] = cell
-
-            # delta_time_measure = time.time() - start_time_measure
-            # print(f"Removal time elapsed: {delta_time_measure * 100:2f}")
+                self._reuse_cell(new_cell_values)
+                
+        
 
     def _calculate_cell_distance(self, cell):
         '''Returns distance between origins of two cells'''
@@ -128,6 +103,33 @@ class Player(CellData):
 
     def _collides_with(self, cell):
         return self._calculate_cell_distance(cell) < (CELL_RADIUS * 0.9 + self.radius) ** 2
+    
+    def _generate_new_cell_values(self, cell):
+            new_pos_x, new_pos_y = random.randint(0, map_size * 2), random.randint(0, map_size * 2)
+
+            new_color = encode_color(
+                random.randint(0, 255),
+                random.randint(0, 255),
+                random.randint(0, 255)
+            )
+            
+            print(f"Player: {self.pos_x}, {self.pos_y}, Cell: ",
+                    cell.pos_x, cell.pos_y)
+
+            print("New cell: ", (new_pos_x, new_pos_y, new_color))
+
+            return new_pos_x, new_pos_y, new_color
+    
+    def _reuse_cell(self, new_values):
+        key, new_pos_x, new_pos_y, new_color = new_values
+        cell = cells[key]
+        cell.pos_x = new_pos_x
+        cell.pos_y = new_pos_y
+        cell.color = new_color
+
+        cells[key] = cell  # TODO: is this needed?
+
+
 
 
 
@@ -142,7 +144,7 @@ def main():
         s.listen()
 
         while (True):
-            # TODO multithreading, multiple users, synchronization
+            # TODO synchronization
             conn, addr = s.accept()
             print(f"Connected with: {addr}")
             player_counter += 1
@@ -150,7 +152,6 @@ def main():
 
             t = Thread(target=handle_player_gameplay, args=(conn, client_id))
             t.start()
-            # handle_player_gameplay(conn)
 
 
 def init_game():
@@ -193,15 +194,18 @@ def spawn_player(client_id, conn, username) -> Player:
         random.randint(0, 255)
     )
 
+    # TODO: random pos
     # return Player(
     #     client_id, random.randint(
     #         0, map_size * 2), random.randint(0, map_size * 2),  # TODO: why x2
     #     player_color, username, conn)
 
     return Player(
-        client_id, 0, 0,  # TODO: why x2
+        client_id, 0, 0, 
         player_color, username, conn)
 
+
+# TODO: change this
 # GET
 # ERROR
 # INFO
@@ -234,9 +238,6 @@ def handle_player_gameplay(conn, client_id):
             # if not data:
             #     break
 
-        # TODO: handle random
-        # global player  # TODO: change to field
-
         # send init game state
         send_message(conn, "POST cells")
         send_cells(conn, cells)
@@ -251,11 +252,6 @@ def handle_player_gameplay(conn, client_id):
                            event=5)
 
         last_update = time.time()
-        # TARGET_FPS = 15
-
-        # network_thread_obj = Thread(
-        #     target=network_handler, args=(conn,), daemon=True)
-        # network_thread_obj.start()
 
         # TODO: Lock()
         connections[client_id] = conn
@@ -264,7 +260,7 @@ def handle_player_gameplay(conn, client_id):
             data = conn.recv(8)
             mouse_x, mouse_y = struct.unpack('ff', data)
 
-            # TODO - this cannot be -1!
+            # TODO - this cannot be -1! -- but can be -999999
             # if mouse_x == -1:
             #     print(f"Player {username} disconnected.")
             #     connections.pop(client_id)
@@ -282,19 +278,11 @@ def handle_player_gameplay(conn, client_id):
 
             # print((player.pos_x, player.pos_y))
 
-            # current_time = time.time()
-            # if current_time - last_update < 1/TARGET_FPS:
-            #     time.sleep(0.001)
-            #     continue
-            # last_update = current_time
-
-            # delta_time_measure = time.time() - start_time_measure
-            # print(f"Time elapsed: {delta_time_measure * 100:2f}")
 
 
 if __name__ == "__main__":
     main()
 
 
-# TODO: exception handling
-# TODO: synchorniaztion!!!
+# TODO: exception handling, handle random disconnect
+# TODO: synchorniaztion!!!  -- check locks and add missing
