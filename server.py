@@ -6,16 +6,17 @@ import re
 import struct
 from newtork_utils import send_cells, send_message, encode_color, send_players, pack_player
 
-cell_count = 2000
-map_size = 4000
+
+HOST = "127.0.0.1"
+PORT = 9999
+
+CELL_COUNT = 2000
+MAP_SIZE = 8000
 PLAYER_SPAWN_RADIUS = 35
 CELL_RADIUS = 10
 
 cells = {} 
 cells_lock = Lock()
-
-HOST = "127.0.0.1"
-PORT = 9999
 
 players = {}  # player_name, player_obj
 players_lock = Lock()  # OK
@@ -95,10 +96,11 @@ class Player(CellData):
             for new_cell_values in cells_to_reuse:
                 self._reuse_cell(new_cell_values)
         
-        with players_lock:
-            for client_id, player in players.items():
-                if self._collides_with(player):
-                    print(f"Player collision: {player.username}" )
+        # TODO: not with self
+        # with players_lock:
+        #     for client_id, player in players.items():
+        #         if self._collides_with(player):
+        #             print(f"Player collision: {player.username}" )
         
 
     def _calculate_distance(self, cell):
@@ -112,14 +114,14 @@ class Player(CellData):
         return self._calculate_distance(other_player) < (other_player.radius * 0.5 + self.radius * 0.5) ** 2
     
     def _generate_new_cell_values(self, cell):
-            new_pos_x, new_pos_y = random.randint(0, map_size * 2), random.randint(0, map_size * 2)
+            new_pos_x, new_pos_y = random.randint(0, MAP_SIZE), random.randint(0, MAP_SIZE)
 
-            new_color = encode_color(
-                random.randint(0, 255),
-                random.randint(0, 255),
-                random.randint(0, 255)
-            )
-            
+            # new_color = encode_color(
+            #     random.randint(0, 255),
+            #     random.randint(0, 255),
+            #     random.randint(0, 255)
+            # )
+            new_color = encode_color(255, 0, 255)  # TODO temp
             print(f"Player: {self.pos_x}, {self.pos_y}, Cell: ",
                     cell.pos_x, cell.pos_y)
 
@@ -163,10 +165,10 @@ def main():
 
 def init_game():
     # spawn point cells
-    for i in range(cell_count):
+    for i in range(CELL_COUNT):
         new_cell = CellData(
-            random.randint(0, map_size * 2),
-            random.randint(0, map_size * 2),
+            random.randint(0, MAP_SIZE),
+            random.randint(0, MAP_SIZE),
             encode_color(
                 random.randint(0, 255),
                 random.randint(0, 255),
@@ -204,7 +206,7 @@ def spawn_player(client_id, conn, username) -> Player:
     # TODO: random pos
     # return Player(
     #     client_id, random.randint(
-    #         0, map_size * 2), random.randint(0, map_size * 2),  # TODO: why x2
+    #         0, MAP_SIZE), random.randint(0, MAP_SIZE),  # TODO: why x2
     #     player_color, username, conn)
 
     return Player(
@@ -251,7 +253,8 @@ def handle_player_gameplay(conn, client_id):
 
         # send init game state
         send_message(conn, "POST cells")
-        send_cells(conn, cells)
+        with cells_lock:
+            send_cells(conn, cells)
 
         # send players (containing current player)
         send_message(conn, "POST players")

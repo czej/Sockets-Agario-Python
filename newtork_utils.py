@@ -79,7 +79,7 @@ def send_players(sock, players):
 
 
 def encode_color(r, g, b):
-    return r * 255*255 + g * 255 + b
+    return r * 256*256 + g * 256 + b
 
 
 def send_message(conn, msg):
@@ -114,11 +114,11 @@ def receive_message(conn):
 
 
 def decode_color(color):
-    r = color % 255
-    color //= 255
-    g = color % 255
-    color //= 255
-    b = color % 255
+    r = color % 256
+    color //= 256
+    g = color % 256
+    color //= 256
+    b = color % 256
 
     return (r, g, b)
 

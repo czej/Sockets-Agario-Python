@@ -12,6 +12,8 @@ pygame.init()
 WIDTH = 1280
 HEIGHT = 720
 cells = {}
+cells_lock = Lock()  # OK
+alive_lock = Lock()
 is_alive = True
 players = {}
 current_player = None
@@ -87,10 +89,6 @@ def parse_players_data(players_data, current_player_username):
             players[client_id] = new_player
 
 
-data_lock = Lock()
-alive_lock = Lock()
-
-
 def network_handler(conn):
     """Receive and process cell removal data"""
     with alive_lock:
@@ -141,7 +139,7 @@ def network_handler(conn):
                 key, new_pos_x, new_pos_y, new_color = struct.unpack(
                     data_format, data)
                 # Remove from local cells dict
-                with data_lock:  # TODO: everywhere or concurrent map
+                with cells_lock:  # TODO: everywhere or concurrent map
                     cell = cells[key]
                     cell.pos_x = new_pos_x
                     cell.pos_y = new_pos_y
@@ -151,6 +149,8 @@ def network_handler(conn):
                     print(f"Removed cell: {key}")
                     print(
                         f"New cell was spawned: {new_pos_x}, {new_pos_y}, {new_color}")
+                    
+                    print("CELL: ", cells[key].pos_x, cells[key].pos_y, cells[key].color)
 
                 if event == 1:
                     global current_player
@@ -223,7 +223,7 @@ def render_game(conn):
                                  current_player.radius / 2)
 
         # print(player.pos_x)
-        with data_lock:
+        with cells_lock:
             for cell in cells.values():
                 cell.draw(
                     SCREEN,
@@ -263,7 +263,7 @@ def render_game(conn):
         CLOCK.tick(FPS)
         SCREEN.fill(background_color)
 
-        # print((current_player.pos_x, current_player.pos_y))
+        print((current_player.pos_x, current_player.pos_y))
 
         # delta_time_measure = time.time() - start_time_measure
         # print(f"Time elapsed: {delta_time_measure * 100:2f}")
