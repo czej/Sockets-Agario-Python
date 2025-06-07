@@ -17,10 +17,9 @@ SMALLFONT = pygame.font.Font("freesansbold.ttf", 16)
 FONT = pygame.font.Font("freesansbold.ttf", 32)
 BIGFONT = pygame.font.Font("freesansbold.ttf", 72)
 
-# TODO: from config
-background_color = (15, 15, 15)
-text_color = (255, 255, 255)
-spawn_size = 35
+BACKGROUND_COLOR = (15, 15, 15)
+TEXT_COLOR = (255, 255, 255)
+SPAWN_SIZE = 35
 CELL_RADIUS = 10
 
 cells = {}
@@ -52,7 +51,7 @@ class Player(Cell):
         display_text = self.username
         
         # Render and draw text
-        text_surface = SMALLFONT.render(display_text, True, text_color)
+        text_surface = SMALLFONT.render(display_text, True, TEXT_COLOR)
         text_rect = text_surface.get_rect(center=(x, y))
         surface.blit(text_surface, text_rect)
 
@@ -237,9 +236,9 @@ def render_game(conn):
         # text = BIGFONT.render("Game over", False, text_color)
         # SCREEN.blit(text, (WIDTH / 2 - 150, HEIGHT / 2 - 40))
 
-        FONT.render(str(round(current_player.radius)), False, text_color)
+        FONT.render(str(round(current_player.radius)), False, TEXT_COLOR)
         text = FONT.render(
-            "Mass: " + str((current_player.radius)), False, text_color)
+            "Mass: " + str((current_player.radius)), False, TEXT_COLOR)
         SCREEN.blit(text, (20, 20))
 
         counter += 1
@@ -253,7 +252,7 @@ def render_game(conn):
         WIDTH, HEIGHT = pygame.display.get_surface().get_size()
         pygame.display.update()
         CLOCK.tick(FPS)
-        SCREEN.fill(background_color)
+        SCREEN.fill(BACKGROUND_COLOR)
 
         # print((current_player.pos_x, current_player.pos_y))
 
