@@ -116,7 +116,6 @@ class Player(CellData):
                         notify_all_clients(
                             defeated.client_id, winner.client_id, winner.radius, current_client_id=winner.client_id, format=Events.PLAYER_EATEN.format, event=Events.PLAYER_EATEN.code)
                     
-                        print("HERE 2")
                     
                     remove_players.append(defeated)
             

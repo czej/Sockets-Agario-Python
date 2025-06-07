@@ -9,8 +9,8 @@ from enums import Events
 
 pygame.init()
 
-HOST = "127.0.0.1"  # The server's hostname or IP address
-PORT = 9999  # The port used by the server
+HOST = "127.0.0.1"  
+PORT = 9999  
 
 WIDTH = 1280
 HEIGHT = 720
@@ -24,9 +24,9 @@ SPAWN_SIZE = 35
 CELL_RADIUS = 10
 
 cells = {}
-cells_lock = Lock()  # OK
+cells_lock = Lock()  
 players = {}
-players_lock = Lock()  # OK
+players_lock = Lock()  
 current_player = None
 current_client_id = -1
 
@@ -181,26 +181,20 @@ def network_handler(conn):
                         
 
                     if event == Events.CELL_EATEN_BY_CURRENT_PLAYER.code:
-                        # TODO no lock, cause only this thread edits -- but other reads!
                         current_player.radius += 0.5
             
         except Exception as e:
-            print(f"Error receiving event or client quitted: {e}")
+            print(f"Game ended.")
             break
 
-# TODO: change encoding: ascii to Unicode or UTF? short char
+
 
 
 def render_game(conn):
     global WIDTH, HEIGHT
     last_send_time = 0
-    SEND_INTERVAL = 1/60  # 60 FPS max
+    SEND_INTERVAL = 1/60 
     FPS = 30
-
-    counter = 0
-    frame_rate = 30
-    start_time = 0
-    frame_rate_delay = 0.5
 
     pygame.display.set_caption("Agar.io")
 
@@ -232,7 +226,6 @@ def render_game(conn):
                 mouse_x = WIDTH / 2
                 mouse_y = HEIGHT / 2
 
-        # Throttle sending to avoid spam
         if current_time - last_send_time > SEND_INTERVAL:
             data = struct.pack('ff', (mouse_x - WIDTH / 2), (mouse_y - HEIGHT / 2))
             conn.sendall(data)
@@ -243,7 +236,7 @@ def render_game(conn):
         current_player.pos_y += ((mouse_y - HEIGHT / 2) /
                                  current_player.radius / 2)
 
-        # print(player.pos_x)
+
         with cells_lock:
             for cell in cells.values():
                 cell.draw(
@@ -254,7 +247,6 @@ def render_game(conn):
 
         with players_lock:
             for other_player in players.values():
-                # print("other player: ", other_player.username)
                 other_player.draw(
                     SCREEN,
                     other_player.pos_x - current_player.pos_x + WIDTH / 2,
@@ -263,28 +255,19 @@ def render_game(conn):
 
         current_player.draw(SCREEN, (WIDTH / 2), (HEIGHT / 2))
 
-        # text = BIGFONT.render("Game over", False, text_color)
-        # SCREEN.blit(text, (WIDTH / 2 - 150, HEIGHT / 2 - 40))
-
-        FONT.render(str(round(current_player.radius)), False, TEXT_COLOR)
+   
         text = FONT.render(
             "Mass: " + str((current_player.radius)), False, TEXT_COLOR)
         SCREEN.blit(text, (20, 20))
 
-        counter += 1
-        if delay := (time.time() - start_time) > frame_rate_delay:
-            frame_rate = round(counter / delay)
-            counter = 0
-            start_time = time.time()
-        SCREEN.blit(FONT.render(
-            f"FPS: {frame_rate}", False, (255, 255, 255)), (20, 50))
+    
 
         WIDTH, HEIGHT = pygame.display.get_surface().get_size()
         pygame.display.update()
         CLOCK.tick(FPS)
         SCREEN.fill(BACKGROUND_COLOR)
 
-        # print((current_player.pos_x, current_player.pos_y))
+        
 
 
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -307,23 +290,19 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     else:
         print("An error occurred")
         print(request)
-        # sys.exit()
 
-    for i in range(2):  # TODO: take this num from config
+    for i in range(2):  
         request = receive_message(s)
-        print("here!")
         if request == "POST cells":
             received_cells = unpack_cells(s)
             print("Received cells:", received_cells)
             parse_cells_data(received_cells)
         elif request == "POST players":
-            print("here2")
             received_players = unpack_players(s)
             print("Received players: ", received_players)
             parse_players_data(received_players, username)
         else:
             print("An error occurred")
             print(request)
-            # sys.exit()
 
     render_game(s)
