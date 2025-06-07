@@ -18,7 +18,7 @@ HOST = "127.0.0.1"
 PORT = 9999
 
 players = {}  # player_name, player_obj
-players_lock = Lock()
+players_lock = Lock()  # OK
 
 connections = {}  # client_id, conn
 connections_lock = Lock()
@@ -94,15 +94,22 @@ class Player(CellData):
 
             for new_cell_values in cells_to_reuse:
                 self._reuse_cell(new_cell_values)
-                
+        
+        with players_lock:
+            for client_id, player in players.items():
+                if self._collides_with(player):
+                    print(f"Player collision: {player.username}" )
         
 
-    def _calculate_cell_distance(self, cell):
+    def _calculate_distance(self, cell):
         '''Returns distance between origins of two cells'''
-        return (cell.pos_x - (self.pos_x)) ** 2 + (cell.pos_y - (self.pos_y)) ** 2
+        return (cell.pos_x - self.pos_x) ** 2 + (cell.pos_y - self.pos_y) ** 2
 
     def _collides_with(self, cell):
-        return self._calculate_cell_distance(cell) < (CELL_RADIUS * 0.9 + self.radius) ** 2
+        return self._calculate_distance(cell) < (CELL_RADIUS * 0.9 + self.radius) ** 2
+    
+    def _collides_with_player(self, other_player):
+        return self._calculate_distance(other_player) < (other_player.radius * 0.5 + self.radius * 0.5) ** 2
     
     def _generate_new_cell_values(self, cell):
             new_pos_x, new_pos_y = random.randint(0, map_size * 2), random.randint(0, map_size * 2)
@@ -221,17 +228,21 @@ def handle_player_gameplay(conn, client_id):
             print("Asking for username...")
             send_message(conn, "GET username")
             username = conn.recv(1024).decode('ascii')
+            players_lock.acquire()
             if (msg := validate_username(username)) != "OK":
                 # TODO: is it ok? maybe use enums for this method?
+                players_lock.release()
                 send_message(conn, "ERROR " + msg)
                 continue
             else:
-                print(f"Player {username} has joined the game.")
-                send_message(conn, "INFO Successfully connected to the game.")
                 # spawn player
                 # TODO: lock on this action - checking and adding username to map
                 # TODO: remove player and cleanup - even if connection was broken
+                # TODO: make this player inactive until renders
                 players[username] = spawn_player(client_id, conn, username)
+                players_lock.release()
+                print(f"Player {username} has joined the game.")
+                send_message(conn, "INFO Successfully connected to the game.")
                 break
 
             # TODO: handle no data == null
@@ -244,14 +255,14 @@ def handle_player_gameplay(conn, client_id):
 
         # send players (containing current player)
         send_message(conn, "POST players")
-        send_players(conn, players)
+        with players_lock:
+            send_players(conn, players)
 
-        # TODO: notify other players about new player
-        player = players[username]
+            # TODO: notify other players about new player
+            player = players[username]
+
         notify_all_clients(packed_data=pack_player(player, add_length=True), current_client_id=client_id,
                            event=5)
-
-        last_update = time.time()
 
         # TODO: Lock()
         connections[client_id] = conn

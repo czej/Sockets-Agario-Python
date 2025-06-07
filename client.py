@@ -263,7 +263,7 @@ def render_game(conn):
         CLOCK.tick(FPS)
         SCREEN.fill(background_color)
 
-        print((current_player.pos_x, current_player.pos_y))
+        # print((current_player.pos_x, current_player.pos_y))
 
         # delta_time_measure = time.time() - start_time_measure
         # print(f"Time elapsed: {delta_time_measure * 100:2f}")
