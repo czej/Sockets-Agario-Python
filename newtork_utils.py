@@ -11,6 +11,7 @@ def notify_client(*data, conn: socket, event: int, format: str | None = "", pack
             send_format, event) + packed_data)
 
 
+# CELLS
 def _pack_cells(cells):
     packed_data = struct.pack('I', len(cells))  # Number of cells
 
@@ -34,8 +35,35 @@ def send_cells(sock, cells):
     except Exception as e:
         print(f"Error sending cells: {e}")
         return False
+    
+
+def unpack_cells(sock):
+    try:
+        # data length
+        length_data = receive_exact(sock, 4)
+        data_length = struct.unpack('I', length_data)[0]
+
+        # actual data
+        packed_data = receive_exact(sock, data_length)
+
+        # number of cells
+        cell_count = struct.unpack('I', packed_data[:4])[0]
+
+        cells = []
+        offset = 4  # Skip the cell count
+
+        for _ in range(cell_count):
+            cell_data = struct.unpack('IffI', packed_data[offset:offset+16])
+            cells.append(cell_data)  # (key, pos_x, pos_y, color)
+            offset += 16
+
+        return cells
+    except Exception as e:
+        print(f"Error receiving cells: {e}")
+        return []
 
 
+# PLAYERS
 def pack_player(player, add_length: bool | None = False):
     packed_player = struct.pack("I", player.client_id)
     encoded_username = player.username.encode("ascii")
@@ -73,65 +101,7 @@ def send_players(sock, players):
     except Exception as e:
         print(f"Error sending players: {e}")
         return False
-
-
-def send_message(conn, msg):
-    data = msg.encode("ascii")
-    length = struct.pack('I', len(data))
-    conn.sendall(length + data)
-
-
-# client
-
-def receive_exact(sock, n_bytes):
-    """Receive exactly n bytes from socket"""
-    data = b''
-    while len(data) < n_bytes:
-        chunk = sock.recv(n_bytes - len(data))
-        if not chunk:
-            raise ConnectionError("Socket connection broken")
-        data += chunk
-    return data
-
-
-def receive_message(conn):
-    # Read 4 bytes for length
-    length_data = conn.recv(4)
-    if not length_data:
-        return None
-    length = struct.unpack('I', length_data)[0]
-
-    # Read exact message length
-    message = conn.recv(length).decode('ascii')
-    return message
-
-
-def unpack_cells(sock):
-    try:
-        # data length
-        length_data = receive_exact(sock, 4)
-        data_length = struct.unpack('I', length_data)[0]
-
-        # actual data
-        packed_data = receive_exact(sock, data_length)
-
-        # number of cells
-        cell_count = struct.unpack('I', packed_data[:4])[0]
-
-        cells = []
-        offset = 4  # Skip the cell count
-
-        for i in range(cell_count):
-            # Unpack each cell (4 integers)
-            # TODO: floats
-            cell_data = struct.unpack('IffI', packed_data[offset:offset+16])
-            cells.append(cell_data)  # (key, pos_x, pos_y, color)
-            offset += 16
-
-        return cells
-    except Exception as e:
-        print(f"Error receiving cells: {e}")
-        return []
+    
 
 
 def unpack_player(packed_data: bytes, start_offset: int | None = 0):
@@ -182,6 +152,37 @@ def unpack_players(sock):
         print(f"Error receiving players: {e}")
         return []
 
+
+# MESSAGES
+def send_message(conn, msg):
+    data = msg.encode("ascii")
+    length = struct.pack('I', len(data))
+    conn.sendall(length + data)
+
+
+def receive_exact(sock, n_bytes):
+    data = b''
+    while len(data) < n_bytes:
+        chunk = sock.recv(n_bytes - len(data))
+        if not chunk:
+            raise ConnectionError("Socket connection broken")
+        data += chunk
+    return data
+
+
+def receive_message(conn):
+    # Read 4 bytes for length
+    length_data = conn.recv(4)
+    if not length_data:
+        return None
+    length = struct.unpack('I', length_data)[0]
+
+    # Read exact message length
+    message = conn.recv(length).decode('ascii')
+    return message
+
+
+# OTHER
 def decode_color(color):
     r = color % 256
     color //= 256

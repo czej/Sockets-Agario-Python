@@ -29,11 +29,6 @@ players_lock = Lock()  # OK
 connections = {}  # client_id, conn
 connections_lock = Lock() # OK
 
-class CellData():
-    def __init__(self, x, y, color):
-        self.color = color
-        self.pos_x = x
-        self.pos_y = y
 
 def notify_all_clients(*data, event: int, format: str | None = "", current_client_id: int | None = None, packed_data: bytes | None = None):
     with connections_lock:
@@ -51,6 +46,11 @@ def notify_all_clients(*data, event: int, format: str | None = "", current_clien
                 
             notify_client(*data, conn=conn, event=send_event, format=format, packed_data=packed_data)
 
+class CellData():
+    def __init__(self, x, y, color):
+        self.color = color
+        self.pos_x = x
+        self.pos_y = y
 
 class Player(CellData):
     def __init__(self, client_id, x, y, color, name, conn):
@@ -227,13 +227,6 @@ def spawn_player(client_id, conn, username) -> Player:
     return Player(
         client_id, 0, 0, 
         player_color, username, conn)
-
-
-# TODO: change this
-# GET
-# ERROR
-# INFO
-# POST
 
 
 def handle_player_gameplay(conn, client_id):

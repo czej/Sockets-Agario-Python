@@ -1,6 +1,6 @@
 import enum
 class Events(enum.Enum):
-    def __new__(cls, *args, **kwds):
+    def __new__(cls, *args, **kwrgs):
         value = len(cls.__members__) + 1
         obj = object.__new__(cls)
         obj._value_ = value
