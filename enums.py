@@ -14,7 +14,7 @@ class Events(enum.Enum):
     CELL_EATEN_BY_CURRENT_PLAYER = 1, "IIII"
     PLAYER_MOVED = 2, "Ifff"
     PLAYER_EATEN = 3, "IIf"
-    GAME_OVER = 4, None
+    GAME_OVER = 4, ""
     NEW_PLAYER = 5, None
     PLAYER_EATEN_BY_CURRENT_PLAYER = 6, "IIf"
     PLAYER_QUIT = 7, "I"

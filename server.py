@@ -15,6 +15,11 @@ MAP_SIZE = 8000
 PLAYER_SPAWN_RADIUS = 35
 CELL_RADIUS = 10
 
+VALID_USERNAME_CHARACTERS = r"^[a-zA-Z\d _-]+$"
+INVALID_USERNAME_MESSAGE = "Invalid username. Valid characters are: letters, digits, ` `, `_`, `-`"
+USERNAME_MAX_LENGTH = 50
+USERNAME_MIN_LENGTH = 1
+
 cells = {} 
 cells_lock = Lock()  # OK
 
@@ -29,7 +34,6 @@ class CellData():
         self.color = color
         self.pos_x = x
         self.pos_y = y
-
 
 def notify_all_clients(*data, event: int, format: str | None = "", current_client_id: int | None = None, packed_data: bytes | None = None):
     with connections_lock:
@@ -72,7 +76,7 @@ class Player(CellData):
                     cells_to_reuse.append((key, new_pos_x, new_pos_y, new_color))
                     notify_all_clients(
                         key, new_pos_x, new_pos_y, new_color,
-                        format="IIII", current_client_id=self.client_id, event=0)
+                        format=Events.CELL_EATEN.format, current_client_id=self.client_id, event=Events.CELL_EATEN.code)
             
                     self.radius += 0.5
 
@@ -107,10 +111,10 @@ class Player(CellData):
                             print(f"REMOVED: {defeated.client_id}")
                             connections.pop(defeated.client_id)
                         
-                        notify_client(conn=defeated.conn, format="", event=4)
+                        notify_client(conn=defeated.conn, format=Events.GAME_OVER.format, event=Events.GAME_OVER.code)
                         
                         notify_all_clients(
-                            defeated.client_id, winner.client_id, winner.radius, current_client_id=winner.client_id, format="IIf", event=3)
+                            defeated.client_id, winner.client_id, winner.radius, current_client_id=winner.client_id, format=Events.PLAYER_EATEN.format, event=Events.PLAYER_EATEN.code)
                     
                         print("HERE 2")
                     
@@ -156,8 +160,6 @@ class Player(CellData):
 
 
 
-
-
 def main():
     print("Server is running.")
     init_game()
@@ -169,7 +171,6 @@ def main():
         s.listen()
 
         while (True):
-            # TODO synchronization
             conn, addr = s.accept()
             print(f"Connected with: {addr}")
             player_counter += 1
@@ -191,20 +192,15 @@ def init_game():
                 random.randint(0, 255)
             ),
         )
-        # lock not needed
+        
         cells[i] = new_cell
 
 
-VALID_USERNAME_CHARACTERS = r"^[a-zA-Z\d _-]+$"
-INVALID_USERNAME_MESSAGE = "Invalid username. Valid characters are: letters, digits, ` `, `_`, `-`"
-USERNAME_MAX_LENGTH = 50
-
-
 def validate_username(username):
-    if username is None or len(username) < 1:
+    if username is None or len(username) < USERNAME_MIN_LENGTH:
         return "Username is too short. Minimum characters is 1."
     
-    if len(username) > 50:
+    if len(username) > USERNAME_MAX_LENGTH:
         return "Username is too long. Maximum characters is 50."
 
     if not re.match(VALID_USERNAME_CHARACTERS, username):
@@ -225,7 +221,7 @@ def spawn_player(client_id, conn, username) -> Player:
 
     # return Player(
     #     client_id, random.randint(
-    #         0, MAP_SIZE), random.randint(0, MAP_SIZE),  # TODO: why x2
+    #         0, MAP_SIZE), random.randint(0, MAP_SIZE), 
     #     player_color, username, conn)
 
     return Player(
@@ -257,7 +253,6 @@ def handle_player_gameplay(conn, client_id):
                     continue
                 else:
                     # spawn player
-                    # TODO: lock on this action - checking and adding username to map
                     # TODO: remove player and cleanup - even if connection was broken
                     # TODO: make this player inactive until renders
                     players[username] = spawn_player(client_id, conn, username)
@@ -286,8 +281,7 @@ def handle_player_gameplay(conn, client_id):
             # TODO: notify other players about new player
             player = players[username]
 
-        notify_all_clients(packed_data=pack_player(player, add_length=True), current_client_id=client_id,
-                           event=5)
+        notify_all_clients(packed_data=pack_player(player, add_length=True), current_client_id=client_id, event=Events.NEW_PLAYER.code)
 
         with connections_lock:
             connections[client_id] = conn
@@ -306,7 +300,7 @@ def handle_player_gameplay(conn, client_id):
                 with players_lock:
                     players.pop(player.username)
                 
-                notify_all_clients(client_id, format="I", event=7)
+                notify_all_clients(client_id, format=Events.PLAYER_QUIT.format, event=Events.PLAYER_QUIT.code)
                 break
 
             player.pos_x += (mouse_x / player.radius / 2)
@@ -317,8 +311,8 @@ def handle_player_gameplay(conn, client_id):
                 break
 
             # ? TODO: send only if close position (remember about scale)
-            notify_all_clients(client_id, player.pos_x, player.pos_y, player.radius, format="Ifff",
-                               current_client_id=client_id, event=2)
+            notify_all_clients(client_id, player.pos_x, player.pos_y, player.radius, format=Events.PLAYER_MOVED.format,
+                               current_client_id=client_id, event=Events.PLAYER_MOVED.code)
 
             # print((player.pos_x, player.pos_y))
 
