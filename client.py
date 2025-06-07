@@ -13,6 +13,7 @@ PORT = 9999  # The port used by the server
 
 WIDTH = 1280
 HEIGHT = 720
+SMALLFONT = pygame.font.Font("freesansbold.ttf", 16)
 FONT = pygame.font.Font("freesansbold.ttf", 32)
 BIGFONT = pygame.font.Font("freesansbold.ttf", 72)
 
@@ -20,6 +21,7 @@ BIGFONT = pygame.font.Font("freesansbold.ttf", 72)
 background_color = (15, 15, 15)
 text_color = (255, 255, 255)
 spawn_size = 35
+CELL_RADIUS = 10
 
 cells = {}
 cells_lock = Lock()  # OK
@@ -30,38 +32,38 @@ current_client_id = -1
 
 
 class Cell():
-    def __init__(self, cell_id, x, y, color, radius):
-        self.cell_id = cell_id  # TODO: is this needed?
+    def __init__(self, x, y, color, radius):
         self.radius = radius
         self.color = color
         self.pos_x = x
         self.pos_y = y
 
     def draw(self, surface, x, y):
-        pygame.draw.circle(surface, self.color, (x, y),
-                           int(self.radius))  # TODO: why int?
+        pygame.draw.circle(surface, self.color, (x, y), self.radius)
 
 
 class Player(Cell):
     def __init__(self, username, x, y, color, radius):
-        super().__init__(-1, x, y, color, radius)
+        super().__init__(x, y, color, radius)
         self.username = username
 
     def draw(self, surface, x, y):
         super().draw(surface, x, y)
-        # todo if username == curren_username or in different method
-        global FONT
-        text = FONT.render(str(round(self.radius)), False, text_color)
+        display_text = self.username
+        
+        # Render and draw text
+        text_surface = SMALLFONT.render(display_text, True, text_color)
+        text_rect = text_surface.get_rect(center=(x, y))
+        surface.blit(text_surface, text_rect)
 
 
 def parse_cells_data(cell_data):
     for cell in cell_data:
         new_cell = Cell(
-            cell[0],
             cell[1],
             cell[2],
             decode_color(cell[3]),
-            10  # TODO: send config info in json
+            CELL_RADIUS 
         )
         cells[cell[0]] = new_cell
 
@@ -187,8 +189,6 @@ def render_game(conn):
     global current_player
 
     while True:
-        # start_time_measure = time.time()
-
         current_time = time.time()
 
         for event in pygame.event.get():
@@ -237,6 +237,7 @@ def render_game(conn):
         # text = BIGFONT.render("Game over", False, text_color)
         # SCREEN.blit(text, (WIDTH / 2 - 150, HEIGHT / 2 - 40))
 
+        FONT.render(str(round(current_player.radius)), False, text_color)
         text = FONT.render(
             "Mass: " + str((current_player.radius)), False, text_color)
         SCREEN.blit(text, (20, 20))
