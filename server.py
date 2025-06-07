@@ -34,7 +34,6 @@ class CellData():
         self.pos_y = y
 
 
-
 def notify_all_clients(*data, event: int, format: str | None = "", current_client_id: int | None = None, packed_data: bytes | None = None):
     with connections_lock:
         for key, conn in connections.items():
@@ -46,16 +45,19 @@ def notify_all_clients(*data, event: int, format: str | None = "", current_clien
 
             elif send_event in (2, 5) and key == current_client_id:
                 continue
+            elif send_event == 3 and key == current_client_id:
+                send_event = 6
+                
 
             notify_client(*data, conn=conn, event=send_event, format=format, packed_data=packed_data)
 
 # 3 == collision with another player (==) -- not needed
 
-
+# 6 == eaten player
 # 7 == player has quit
 # 5 == new player has joined
 # 4 == game over - was eaten by another player
-# 3 == other player was eaten
+# 3 == other player was eaten by other player
 # 2 == another player has moved
 # 1 == cell eaten by current_player
 # 0 == cell eaten by different player
@@ -68,6 +70,7 @@ class Player(CellData):
         self.radius = PLAYER_SPAWN_RADIUS
         self.username = name
         self.conn = conn
+        self.is_alive = True
 
     def collision_check(self):
         cells_to_reuse = []
@@ -93,7 +96,8 @@ class Player(CellData):
         
         
         with players_lock:
-            for username, other_player in players.items():
+            remove_players = []
+            for other_player in players.values():
                 if other_player.client_id == self.client_id:
                     continue
 
@@ -109,23 +113,29 @@ class Player(CellData):
                     else:
                         continue
 
-                    winner.radius += defeated.radius
+                    if winner == self:
+                        winner.radius += defeated.radius
+                        defeated.is_alive = False
 
-                    # TODO: handle game over for defeated - disconnect
-                    # remove all data (modify connection out of this scope to avoid deadlock!)
+                        print(f"Player {defeated.username} was eaten by {winner.username}.")
+                        with connections_lock:
+                            print(f"REMOVED: {defeated.client_id}")
+                            connections.pop(defeated.client_id)
+                        
+                        notify_client(conn=defeated.conn, format="", event=4)
+                        
+                        notify_all_clients(
+                            defeated.client_id, winner.client_id, winner.radius, current_client_id=winner.client_id, format="IIf", event=3)
+                    
+                        print("HERE 2")
+                    
+                    remove_players.append(defeated)
+            
+            for player in remove_players:
+                players.pop(player.username, None)
 
-                    # others + winning player:
-                    # defeated: get client id to remove
-                    # won: get client_id, new radius
-                    notify_all_clients(
-                        defeated.client_id, winner.client_id, winner.radius,
-                        format="III", current_client_id=self.client_id, event=3)
 
-                    # defeated player:
-                    # send game over
-                    notify_client(conn=defeated.conn, format="", current_client_id=self.client_id, event=4)
-        
-
+                    
     def _calculate_distance(self, cell):
         '''Returns distance between origins of two cells'''
         return (cell.pos_x - self.pos_x) ** 2 + (cell.pos_y - self.pos_y) ** 2
@@ -247,7 +257,6 @@ def spawn_player(client_id, conn, username) -> Player:
 
 
 def handle_player_gameplay(conn, client_id):
-    # TODO: send config
     username = ""
 
     with conn:
@@ -320,6 +329,8 @@ def handle_player_gameplay(conn, client_id):
             player.pos_y += (mouse_y / player.radius / 2)
 
             player.collision_check()
+            if not player.is_alive:
+                break
 
             # ? TODO: send only if close position (remember about scale)
             notify_all_clients(client_id, player.pos_x, player.pos_y, player.radius, format="Ifff",

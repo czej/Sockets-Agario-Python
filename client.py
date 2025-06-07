@@ -45,6 +45,7 @@ class Player(Cell):
     def __init__(self, username, x, y, color, radius):
         super().__init__(x, y, color, radius)
         self.username = username
+        self.is_alive = True
 
     def draw(self, surface, x, y):
         super().draw(surface, x, y)
@@ -93,7 +94,8 @@ def network_handler(conn):
         try:
             event_data = receive_exact(conn, struct.calcsize("I"))
             event = struct.unpack("I", event_data)[0]
-            print("Event: ", event)
+            if event != 2:
+                print("Event: ", event)
 
             if event == 2:  # TODO: enums
                 data_format = "Ifff"  # TODO: this should be also in enum
@@ -106,8 +108,8 @@ def network_handler(conn):
                     player.pos_y = new_pos_y
                     player.radius = new_radius
 
-                print(
-                    f"New pos: {new_pos_x}, {new_pos_y}, {new_radius}")
+                # print(
+                #     f"New pos: {new_pos_x}, {new_pos_y}, {new_radius}")
 
             elif event == 5:
                 length_data = receive_exact(conn, 4)
@@ -133,7 +135,37 @@ def network_handler(conn):
                 with players_lock:
                     players.pop(client_id)
 
-            elif event in (0, 1):
+            elif event == 3:
+                data_format = "IIf"
+                data = receive_exact(conn, struct.calcsize(data_format))
+                defeated_client_id, winner_client_id, new_winner_radius = struct.unpack(
+                    data_format, data)
+                
+                with players_lock:
+                    players.pop(defeated_client_id, None)
+                    try:
+                        winner = players[winner_client_id]
+                        winner.radius = new_winner_radius
+                    except Exception as e:
+                        print(e)
+
+            elif event == 6:
+                data_format = "IIf"
+                data = receive_exact(conn, struct.calcsize(data_format))
+                defeated_client_id, winner_client_id, new_winner_radius = struct.unpack(
+                    data_format, data)
+                
+                with players_lock:
+                    players.pop(defeated_client_id, None)
+                    current_player.radius = new_winner_radius
+
+            elif event == 4:
+                print("Game over.")
+                current_player.is_alive = False
+                break
+
+
+            elif event == 0 or event == 1:
                 data_format = "IIII"
                 data = receive_exact(conn, struct.calcsize(data_format))
                 key, new_pos_x, new_pos_y, new_color = struct.unpack(
@@ -145,18 +177,15 @@ def network_handler(conn):
                     cell.pos_y = new_pos_y
                     cell.color = decode_color(new_color)
 
-                    # cells[key] = cell  # TODO: is this needed?
                     print(f"Removed cell: {key}")
-                    print(
-                        f"New cell was spawned: {new_pos_x}, {new_pos_y}, {new_color}")
+                    print(f"New cell was spawned: {new_pos_x}, {new_pos_y}, {new_color}")
                     
-                    print("CELL: ", cells[key].pos_x, cells[key].pos_y, cells[key].color)
 
                 if event == 1:
-                    global current_player
                     # TODO no lock, cause only this thread edits -- but other reads!
                     current_player.radius += 0.5
 
+            
         except Exception as e:
             print(f"Error receiving event or client quitted: {e}")
             break
@@ -189,6 +218,9 @@ def render_game(conn):
 
     while True:
         current_time = time.time()
+
+        if not current_player.is_alive:
+            return
 
         for event in pygame.event.get():
             if event.type == QUIT:
