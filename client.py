@@ -5,6 +5,7 @@ import time
 from threading import Thread, Lock
 from pygame.locals import QUIT, MOUSEMOTION
 from newtork_utils import decode_color, receive_message, unpack_cells, receive_exact, unpack_players, unpack_player
+from enums import Events
 
 pygame.init()
 
@@ -89,7 +90,7 @@ def parse_players_data(players_data, current_player_username):
 
 
 def network_handler(conn):
-    """Receive and process cell removal data"""
+    """Receive and process network data"""
     while True:
         try:
             event_data = receive_exact(conn, struct.calcsize("I"))
@@ -97,94 +98,91 @@ def network_handler(conn):
             if event != 2:
                 print("Event: ", event)
 
-            if event == 2:  # TODO: enums
-                data_format = "Ifff"  # TODO: this should be also in enum
-                data = receive_exact(conn, struct.calcsize(data_format))
-                client_id, new_pos_x, new_pos_y, new_radius = struct.unpack(data_format, data)
+            match event:
+                case Events.PLAYER_MOVED.code:
+                    data_format = Events.PLAYER_MOVED.format
+                    data = receive_exact(conn, struct.calcsize(data_format))
+                    client_id, new_pos_x, new_pos_y, new_radius = struct.unpack(data_format, data)
 
-                with players_lock:
-                    player = players[client_id]
-                    player.pos_x = new_pos_x
-                    player.pos_y = new_pos_y
-                    player.radius = new_radius
+                    with players_lock:
+                        player = players[client_id]
+                        player.pos_x = new_pos_x
+                        player.pos_y = new_pos_y
+                        player.radius = new_radius
 
-                # print(
-                #     f"New pos: {new_pos_x}, {new_pos_y}, {new_radius}")
+                case Events.NEW_PLAYER.code:
+                    length_data = receive_exact(conn, 4)
+                    data_length = struct.unpack('I', length_data)[0]
+                    packed_data = receive_exact(conn, data_length)
+                    (client_id, username, pos_x, pos_y, color, radius), _ = unpack_player(packed_data=packed_data) 
+                    print(f"New player has joined: {username}")
+                    new_player = Player(
+                        username,
+                        pos_x,
+                        pos_y,
+                        decode_color(color),
+                        radius
+                    )
 
-            elif event == 5:
-                length_data = receive_exact(conn, 4)
-                data_length = struct.unpack('I', length_data)[0]
-                packed_data = receive_exact(conn, data_length)
-                (client_id, username, pos_x, pos_y, color, radius), _ = unpack_player(packed_data=packed_data) 
-                print(f"New player has joined: {username}")
-                new_player = Player(
-                    username,
-                    pos_x,
-                    pos_y,
-                    decode_color(color),
-                    radius
-                )
-
-                with players_lock:
-                    players[client_id] = new_player
-
-            elif event == 7:
-                data_format = "I"
-                data = receive_exact(conn, struct.calcsize(data_format))
-                client_id = struct.unpack(data_format, data)[0]
-                with players_lock:
-                    players.pop(client_id)
-
-            elif event == 3:
-                data_format = "IIf"
-                data = receive_exact(conn, struct.calcsize(data_format))
-                defeated_client_id, winner_client_id, new_winner_radius = struct.unpack(
-                    data_format, data)
-                
-                with players_lock:
-                    players.pop(defeated_client_id, None)
-                    try:
-                        winner = players[winner_client_id]
-                        winner.radius = new_winner_radius
-                    except Exception as e:
-                        print(e)
-
-            elif event == 6:
-                data_format = "IIf"
-                data = receive_exact(conn, struct.calcsize(data_format))
-                defeated_client_id, winner_client_id, new_winner_radius = struct.unpack(
-                    data_format, data)
-                
-                with players_lock:
-                    players.pop(defeated_client_id, None)
-                    current_player.radius = new_winner_radius
-
-            elif event == 4:
-                print("Game over.")
-                current_player.is_alive = False
-                break
-
-
-            elif event == 0 or event == 1:
-                data_format = "IIII"
-                data = receive_exact(conn, struct.calcsize(data_format))
-                key, new_pos_x, new_pos_y, new_color = struct.unpack(
-                    data_format, data)
-                # Remove from local cells dict
-                with cells_lock:  # TODO: everywhere or concurrent map
-                    cell = cells[key]
-                    cell.pos_x = new_pos_x
-                    cell.pos_y = new_pos_y
-                    cell.color = decode_color(new_color)
-
-                    print(f"Removed cell: {key}")
-                    print(f"New cell was spawned: {new_pos_x}, {new_pos_y}, {new_color}")
+                    with players_lock:
+                        players[client_id] = new_player
                     
 
-                if event == 1:
-                    # TODO no lock, cause only this thread edits -- but other reads!
-                    current_player.radius += 0.5
+                case Events.PLAYER_QUIT.code:
+                    data_format = Events.PLAYER_QUIT.format
+                    data = receive_exact(conn, struct.calcsize(data_format))
+                    client_id = struct.unpack(data_format, data)[0]
+                    with players_lock:
+                        players.pop(client_id)
 
+                case Events.PLAYER_EATEN.code:
+                    data_format = Events.PLAYER_EATEN.format
+                    data = receive_exact(conn, struct.calcsize(data_format))
+                    defeated_client_id, winner_client_id, new_winner_radius = struct.unpack(
+                        data_format, data)
+                    
+                    with players_lock:
+                        players.pop(defeated_client_id, None)
+                        try:
+                            winner = players[winner_client_id]
+                            winner.radius = new_winner_radius
+                        except Exception as e:
+                            print(e)
+                    
+                case Events.PLAYER_EATEN_BY_CURRENT_PLAYER.code:
+                    data_format = Events.PLAYER_EATEN_BY_CURRENT_PLAYER.format
+                    data = receive_exact(conn, struct.calcsize(data_format))
+                    defeated_client_id, winner_client_id, new_winner_radius = struct.unpack(
+                        data_format, data)
+                    
+                    with players_lock:
+                        players.pop(defeated_client_id, None)
+                        current_player.radius = new_winner_radius
+
+                case Events.GAME_OVER.code:
+                    print("Game over.")
+                    current_player.is_alive = False
+                    break
+
+                case Events.CELL_EATEN.code | Events.CELL_EATEN_BY_CURRENT_PLAYER.code:
+                    data_format = Events.CELL_EATEN.format
+                    data = receive_exact(conn, struct.calcsize(data_format))
+                    key, new_pos_x, new_pos_y, new_color = struct.unpack(
+                        data_format, data)
+
+                    with cells_lock:  
+                        cell = cells[key]
+                        cell.pos_x = new_pos_x
+                        cell.pos_y = new_pos_y
+                        cell.color = decode_color(new_color)
+
+                        print(f"Removed cell: {key}")
+                        print(f"New cell was spawned: {new_pos_x}, {new_pos_y}, {new_color}")
+                        
+
+                    if event == Events.CELL_EATEN_BY_CURRENT_PLAYER.code:
+                        # TODO no lock, cause only this thread edits -- but other reads!
+                        current_player.radius += 0.5
             
         except Exception as e:
             print(f"Error receiving event or client quitted: {e}")

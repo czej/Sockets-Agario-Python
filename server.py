@@ -1,10 +1,10 @@
 import socket
 import random
-import time
 from threading import Thread, Lock
 import re
 import struct
 from newtork_utils import send_cells, send_message, encode_color, send_players, pack_player, notify_client
+from enums import Events
 
 
 HOST = "127.0.0.1"
@@ -24,9 +24,6 @@ players_lock = Lock()  # OK
 connections = {}  # client_id, conn
 connections_lock = Lock() # OK
 
-# @dataclass -- ideally, but I'll convert it to Java anyways
-
-
 class CellData():
     def __init__(self, x, y, color):
         self.color = color
@@ -39,28 +36,16 @@ def notify_all_clients(*data, event: int, format: str | None = "", current_clien
         for key, conn in connections.items():
             send_event = event
 
-            # cell eaten by current or another player
-            if send_event == 0 and key == current_client_id:
-                send_event = 1
+            if send_event == Events.CELL_EATEN.code and key == current_client_id:
+                send_event = Events.CELL_EATEN_BY_CURRENT_PLAYER.code
 
-            elif send_event in (2, 5) and key == current_client_id:
+            elif send_event in (Events.PLAYER_MOVED.code, Events.NEW_PLAYER.code) and key == current_client_id:
                 continue
-            elif send_event == 3 and key == current_client_id:
-                send_event = 6
+
+            elif send_event == Events.PLAYER_EATEN.code and key == current_client_id:
+                send_event = Events.PLAYER_EATEN_BY_CURRENT_PLAYER.code
                 
-
             notify_client(*data, conn=conn, event=send_event, format=format, packed_data=packed_data)
-
-# 3 == collision with another player (==) -- not needed
-
-# 6 == eaten player
-# 7 == player has quit
-# 5 == new player has joined
-# 4 == game over - was eaten by another player
-# 3 == other player was eaten by other player
-# 2 == another player has moved
-# 1 == cell eaten by current_player
-# 0 == cell eaten by different player
 
 
 class Player(CellData):
@@ -238,7 +223,6 @@ def spawn_player(client_id, conn, username) -> Player:
         random.randint(0, 255)
     )
 
-    # TODO: random pos
     # return Player(
     #     client_id, random.randint(
     #         0, MAP_SIZE), random.randint(0, MAP_SIZE),  # TODO: why x2
