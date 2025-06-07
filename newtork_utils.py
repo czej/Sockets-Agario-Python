@@ -12,31 +12,23 @@ def notify_client(*data, conn: socket, event: int, format: str | None = "", pack
 
 
 def _pack_cells(cells):
-    """
-    Pack cell data into binary format for efficient transmission
-    cells: list of tuples [(key, pos_x, pos_y, color), ...]
-    """
-    # Format: 'I' = unsigned int (4 bytes each)
-    # We'll send count first, then all cell data
     packed_data = struct.pack('I', len(cells))  # Number of cells
 
     for key, cell in cells.items():
-        # Pack each cell as 4 unsigned integers
-        # TODO: consider shorts
-        packed_data += struct.pack('IIII', key, cell.pos_x,
+        packed_data += struct.pack('IffI', key, cell.pos_x,
                                    cell.pos_y, cell.color)
 
     return packed_data
 
 
 def send_cells(sock, cells):
-    """Send cell data over socket"""
     try:
         packed_data = _pack_cells(cells)
-        # Send data length first (for reliable receiving)
+
+        # Send data length first
         data_length = len(packed_data)
         sock.send(struct.pack('I', data_length))
-        # Send the actual data
+
         sock.send(packed_data)
         return True
     except Exception as e:
@@ -45,7 +37,6 @@ def send_cells(sock, cells):
 
 
 def pack_player(player, add_length: bool | None = False):
-    # TODO: consider shorts
     packed_player = struct.pack("I", player.client_id)
     encoded_username = player.username.encode("ascii")
 
@@ -61,10 +52,6 @@ def pack_player(player, add_length: bool | None = False):
 
 
 def _pack_players(players):
-    """
-    Pack cell data into binary format for efficient transmission
-    cells: list of tuples [(key, pos_x, pos_y, color), ...]
-    """
     packed_data = struct.pack('I', len(players))  # Number of players
 
     for player in players.values():
@@ -74,22 +61,18 @@ def _pack_players(players):
 
 
 def send_players(sock, players):
-    """Send cell data over socket"""
     try:
         packed_data = _pack_players(players)
-        # Send data length first (for reliable receiving)
+
+        # Send data length first
         data_length = len(packed_data)
         sock.send(struct.pack('I', data_length))
-        # Send the actual data
+        
         sock.send(packed_data)
         return True
     except Exception as e:
         print(f"Error sending players: {e}")
         return False
-
-
-def encode_color(r, g, b):
-    return r * 256*256 + g * 256 + b
 
 
 def send_message(conn, msg):
@@ -123,30 +106,16 @@ def receive_message(conn):
     return message
 
 
-def decode_color(color):
-    r = color % 256
-    color //= 256
-    g = color % 256
-    color //= 256
-    b = color % 256
-
-    return (r, g, b)
-
-
 def unpack_cells(sock):
-    """
-    Receive and unpack cell data from socket
-    Returns: list of tuples [(key, pos_x, pos_y, color), ...]
-    """
     try:
-        # First receive the data length
+        # data length
         length_data = receive_exact(sock, 4)
         data_length = struct.unpack('I', length_data)[0]
 
-        # Then receive the actual data
+        # actual data
         packed_data = receive_exact(sock, data_length)
 
-        # Unpack number of cells
+        # number of cells
         cell_count = struct.unpack('I', packed_data[:4])[0]
 
         cells = []
@@ -155,7 +124,7 @@ def unpack_cells(sock):
         for i in range(cell_count):
             # Unpack each cell (4 integers)
             # TODO: floats
-            cell_data = struct.unpack('IIII', packed_data[offset:offset+16])
+            cell_data = struct.unpack('IffI', packed_data[offset:offset+16])
             cells.append(cell_data)  # (key, pos_x, pos_y, color)
             offset += 16
 
@@ -166,7 +135,6 @@ def unpack_cells(sock):
 
 
 def unpack_player(packed_data: bytes, start_offset: int | None = 0):
-    # TODO: consider shorts
     offset = start_offset
     client_id = struct.unpack(
         'I', packed_data[offset:offset + struct.calcsize('I')])[0]
@@ -188,19 +156,15 @@ def unpack_player(packed_data: bytes, start_offset: int | None = 0):
 
 
 def unpack_players(sock):
-    """
-    Receive and unpack cell data from socket
-    Returns: list of tuples [(key, pos_x, pos_y, color), ...]
-    """
     try:
-        # First receive the data length
+        # data length
         length_data = receive_exact(sock, 4)
         data_length = struct.unpack('I', length_data)[0]
 
-        # Then receive the actual data
+        # actual data
         packed_data = receive_exact(sock, data_length)
 
-        # Unpack number of players
+        # number of players
         count = struct.unpack('I', packed_data[:4])[0]
 
         players = []
@@ -217,3 +181,15 @@ def unpack_players(sock):
     except Exception as e:
         print(f"Error receiving players: {e}")
         return []
+
+def decode_color(color):
+    r = color % 256
+    color //= 256
+    g = color % 256
+    color //= 256
+    b = color % 256
+
+    return (r, g, b)
+
+def encode_color(r, g, b):
+    return r * 256*256 + g * 256 + b
